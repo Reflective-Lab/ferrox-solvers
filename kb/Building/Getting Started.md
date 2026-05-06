@@ -6,7 +6,7 @@ source: mixed
 
 ```bash
 git clone https://github.com/Reflective-Lab/ferrox-solvers.git
-cd ferrox
+cd ferrox-solvers
 just                # check + lint + test
 ```
 
