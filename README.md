@@ -1,11 +1,11 @@
 # Ferrox
 
-[![CI](https://github.com/Reflective-Lab/ferrox/actions/workflows/ci.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox/actions/workflows/ci.yml)
-[![Security](https://github.com/Reflective-Lab/ferrox/actions/workflows/security.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox/actions/workflows/security.yml)
+[![CI](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/ci.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/ci.yml)
+[![Security](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/security.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/security.yml)
 ![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kpernyer/92b9c8ad8b913f7f74bfa63cac838bbc/raw/ferrox-coverage.json)
 [![Crates.io](https://img.shields.io/crates/v/ferrox-solver.svg)](https://crates.io/crates/ferrox-solver)
 [![docs.rs](https://docs.rs/ferrox-solver/badge.svg)](https://docs.rs/ferrox-solver)
-[![dependency status](https://deps.rs/repo/github/Reflective-Lab/ferrox/status.svg)](https://deps.rs/repo/github/Reflective-Lab/ferrox)
+[![dependency status](https://deps.rs/repo/github/Reflective-Lab/ferrox-solvers/status.svg)](https://deps.rs/repo/github/Reflective-Lab/ferrox-solvers)
 ![MSRV](https://img.shields.io/badge/MSRV-1.94.0-blue)
 <img alt="gitleaks badge" src="https://img.shields.io/badge/protected%20by-gitleaks-blue">
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
