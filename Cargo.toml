@@ -20,11 +20,11 @@ ferrox-ortools-sys = { path = "crates/ortools-sys", version = "0.4.1" }
 ferrox-highs-sys   = { path = "crates/highs-sys",   version = "0.4.1" }
 ferrox             = { path = "crates/ferrox",       package = "ferrox-solver", version = "0.4.1" }
 
-# converge — path deps during development (points at work/converge until releases catch up)
-converge-pack  = { path = "../../work/converge/crates/pack",         version = "3.7.4" }
-converge-model = { path = "../../work/converge/crates/model",        version = "3.7.4" }
-converge-core  = { path = "../../work/converge/crates/core",         version = "3.7.4" }
-converge-provider-api = { path = "../../work/converge/crates/provider-api", version = "3.7.4" }
+# converge
+converge-pack = "3.8.1"
+converge-model = "3.8.1"
+converge-core = "3.8.1"
+converge-provider-api = "3.8.1"
 
 # shared
 async-trait = "0.1"
