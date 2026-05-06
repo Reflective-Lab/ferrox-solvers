@@ -227,7 +227,7 @@ fn assemble_cp(req: &FormationRequest, catalog: &[ProfileSnapshot]) -> Formation
 }
 
 fn score(snap: &ProfileSnapshot) -> i64 {
-    use converge_provider_api::{CostClass, LatencyClass};
+    use converge_provider::{CostClass, LatencyClass};
 
     #[allow(clippy::cast_possible_truncation)]
     let base = (f64::from(snap.confidence_max) * 1000.0) as i64;
@@ -253,7 +253,7 @@ fn score(snap: &ProfileSnapshot) -> i64 {
 mod tests {
     use super::*;
     use converge_model::formation::{SuggestorCapability, SuggestorRole};
-    use converge_provider_api::{CostClass, LatencyClass};
+    use converge_provider::{CostClass, LatencyClass};
 
     fn snap(name: &str, role: SuggestorRole, conf_max: f32) -> ProfileSnapshot {
         ProfileSnapshot {

@@ -24,7 +24,7 @@ ferrox-highs-sys   = { workspace = true, optional = true }
 
 converge-pack         = { workspace = true }
 converge-model        = { workspace = true }
-converge-provider-api = { workspace = true }
+converge-provider = { workspace = true }
 
 async-trait = { workspace = true }
 serde       = { workspace = true }

@@ -15,7 +15,7 @@ plus optional adapter crates with adapter-qualified names.
 
 - `converge-pack` — `Pack`, `ProposedPlan`, `ProblemSpec`
 - `converge-model` — semantic types
-- `converge-provider-api` — capability identity (when applicable)
+- `converge-provider` — capability identity (when applicable)
 
 ## Forbidden imports
 

@@ -24,7 +24,7 @@ ferrox             = { path = "crates/ferrox",      package = "converge-ferrox-s
 converge-pack = "3.8.1"
 converge-model = "3.8.1"
 converge-core = "3.8.1"
-converge-provider-api = "3.8.1"
+converge-provider = "3.8.1"
 
 # shared
 async-trait = "0.1"

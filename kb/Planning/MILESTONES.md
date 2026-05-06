@@ -5,11 +5,12 @@ source: mixed
 
 > See `~/dev/work/EPIC.md` for the coarse-grained outcomes these milestones advance.
 
-## Current: v0.1 — _release theme_
+## Current: v0.4.1 — Converge 3.8.1 Solver Baseline
 
-**Target:** YYYY-MM | **Tracks:** _foundation release line_
+**Target:** 2026-05 | **Tracks:** Converge 3.8.1
 
-- [ ] _deliverable_
+- [ ] Keep workspace package version at `0.4.1`.
+- [ ] Keep Converge dependencies on the `3.8.1` contract baseline.
 - [ ] Adopt Extension Release Checklist (security-audit, coverage, performance-profile, soak)
 - [ ] First clean `just release-check` run
-- [ ] Tag v0.1.0
+- [ ] Tag v0.4.1
