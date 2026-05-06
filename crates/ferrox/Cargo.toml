@@ -1,5 +1,5 @@
 [package]
-name = "ferrox-solver"
+name = "converge-ferrox-solver"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

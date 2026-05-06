@@ -3,14 +3,17 @@
 [![CI](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/ci.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/ci.yml)
 [![Security](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/security.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/security.yml)
 ![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kpernyer/92b9c8ad8b913f7f74bfa63cac838bbc/raw/ferrox-coverage.json)
-[![Crates.io](https://img.shields.io/crates/v/ferrox-solver.svg)](https://crates.io/crates/ferrox-solver)
-[![docs.rs](https://docs.rs/ferrox-solver/badge.svg)](https://docs.rs/ferrox-solver)
+[![Crates.io](https://img.shields.io/crates/v/converge-ferrox-solver.svg)](https://crates.io/crates/converge-ferrox-solver)
+[![docs.rs](https://docs.rs/converge-ferrox-solver/badge.svg)](https://docs.rs/converge-ferrox-solver)
 [![dependency status](https://deps.rs/repo/github/Reflective-Lab/ferrox-solvers/status.svg)](https://deps.rs/repo/github/Reflective-Lab/ferrox-solvers)
 ![MSRV](https://img.shields.io/badge/MSRV-1.94.0-blue)
 <img alt="gitleaks badge" src="https://img.shields.io/badge/protected%20by-gitleaks-blue">
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Constraint solving as a Converge Suggestor.**
+
+Cargo package: `converge-ferrox-solver`. Rust library name remains `ferrox`;
+server and sys packages use the same `converge-ferrox-*` prefix.
 
 LLMs are remarkable at understanding intent, drafting plans, explaining tradeoffs, and generating candidate solutions.
 They are not optimisers.

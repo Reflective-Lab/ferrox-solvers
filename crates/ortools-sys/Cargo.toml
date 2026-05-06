@@ -1,5 +1,5 @@
 [package]
-name = "ferrox-ortools-sys"
+name = "converge-ferrox-ortools-sys"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,10 @@ keywords    = ["or-tools", "cp-sat", "optimization", "solver", "ffi"]
 categories  = ["external-ffi-bindings", "algorithms"]
 build = "build.rs"
 links = "ortools"
+
+[lib]
+name = "ferrox_ortools_sys"
+path = "src/lib.rs"
 
 [features]
 default = []

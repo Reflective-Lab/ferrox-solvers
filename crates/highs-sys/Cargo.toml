@@ -1,5 +1,5 @@
 [package]
-name = "ferrox-highs-sys"
+name = "converge-ferrox-highs-sys"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,10 @@ keywords    = ["highs", "mip", "linear-programming", "optimization", "ffi"]
 categories  = ["external-ffi-bindings", "algorithms"]
 build = "build.rs"
 links = "highs"
+
+[lib]
+name = "ferrox_highs_sys"
+path = "src/lib.rs"
 
 [features]
 default = []

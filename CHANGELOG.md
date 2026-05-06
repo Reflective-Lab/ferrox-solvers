@@ -12,6 +12,11 @@ Versioning before 1.0 with the usual pre-1.0 compatibility caveats.
 - Standard GitHub community health files.
 - `AGENTS.md` and capitalized `Justfile` for agent and local workflow entry.
 
+### Changed
+
+- Cargo packages renamed under the `converge-ferrox-*` prefix while keeping
+  Rust library and binary names stable.
+
 ## [0.4.1] - 2026-05-05
 
 ### Added

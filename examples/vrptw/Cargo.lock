@@ -122,14 +122,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
-name = "ferrox"
-version = "0.1.0"
+name = "converge-ferrox-solver"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "converge-model",
  "converge-pack",
  "converge-provider-api",
- "ferrox-ortools-sys",
+ "converge-ferrox-ortools-sys",
  "serde",
  "serde_json",
  "thiserror",
@@ -137,8 +137,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "ferrox-ortools-sys"
-version = "0.1.0"
+name = "converge-ferrox-ortools-sys"
+version = "0.4.1"
 dependencies = [
  "cc",
 ]
@@ -451,7 +451,7 @@ version = "0.1.0"
 dependencies = [
  "converge-core",
  "converge-pack",
- "ferrox",
+ "converge-ferrox-solver",
  "serde_json",
  "tokio",
 ]
