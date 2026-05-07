@@ -1,8 +1,9 @@
 # Ferrox
 
 [![CI](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/ci.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/ci.yml)
+[![Coverage](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/coverage.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/coverage.yml)
 [![Security](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/security.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/security.yml)
-![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/kpernyer/92b9c8ad8b913f7f74bfa63cac838bbc/raw/ferrox-coverage.json)
+[![Stability](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/stability.yml/badge.svg)](https://github.com/Reflective-Lab/ferrox-solvers/actions/workflows/stability.yml)
 [![Crates.io](https://img.shields.io/crates/v/converge-ferrox-solver.svg)](https://crates.io/crates/converge-ferrox-solver)
 [![docs.rs](https://docs.rs/converge-ferrox-solver/badge.svg)](https://docs.rs/converge-ferrox-solver)
 [![dependency status](https://deps.rs/repo/github/Reflective-Lab/ferrox-solvers/status.svg)](https://deps.rs/repo/github/Reflective-Lab/ferrox-solvers)
