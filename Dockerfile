@@ -76,7 +76,7 @@ RUN set -eux; \
     cd /workspace; \
     RUSTFLAGS="-L /opt/ortools/build/lib $ABSL_FLAGS $PROTOBUF_FLAGS" \
       cargo build --release \
-        --package ferrox-server --features ferrox-server/full
+        --package converge-ferrox-server --features converge-ferrox-server/full
 
 # ─── Stage 3: Minimal runtime ────────────────────────────────────────────────
 FROM debian:trixie-slim AS runtime
