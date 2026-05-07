@@ -33,13 +33,13 @@ const SCALE: i64 = 100;
 /// ```
 ///
 /// **Confidence:**
-/// - `optimal` → visit_ratio (resource-limited if < 1.0, otherwise proven max throughput)
-/// - `feasible` → visit_ratio × 0.85
+/// - `optimal` → `visit_ratio` (resource-limited if < 1.0, otherwise proven max throughput)
+/// - `feasible` → `visit_ratio` × 0.85
 pub struct CpSatVrptwSuggestor;
 
 #[async_trait]
 impl Suggestor for CpSatVrptwSuggestor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "CpSatVrptwSuggestor"
     }
 
@@ -118,6 +118,13 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 
 // ── Solver ────────────────────────────────────────────────────────────────────
 
+#[allow(
+    clippy::too_many_lines,
+    clippy::needless_range_loop,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
 pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
     let t0 = Instant::now();
     let n = req.customers.len();
@@ -328,12 +335,12 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
     }
 
     // Distance back to depot.
-    if let Some(last_stop) = route.last() {
-        if let Some(c) = req.customers.iter().find(|c| c.id == last_stop.customer_id) {
-            let dx = c.x - req.depot.x;
-            let dy = c.y - req.depot.y;
-            total_distance += (dx * dx + dy * dy).sqrt();
-        }
+    if let Some(last_stop) = route.last()
+        && let Some(c) = req.customers.iter().find(|c| c.id == last_stop.customer_id)
+    {
+        let dx = c.x - req.depot.x;
+        let dy = c.y - req.depot.y;
+        total_distance += (dx * dx + dy * dy).sqrt();
     }
 
     #[allow(clippy::cast_precision_loss)]
@@ -349,5 +356,148 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
         solver: "cp-sat-v9.15".to_string(),
         status: status.to_string(),
         wall_time_seconds: elapsed,
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::doc_markdown,
+    clippy::similar_names
+)]
+mod tests {
+    use super::*;
+    use crate::test_support::MockContext;
+    use crate::vrptw::problem::{Customer, Depot};
+
+    fn customer(id: usize, x: f64, y: f64, open: i64, close: i64) -> Customer {
+        Customer {
+            id,
+            name: format!("c{id}"),
+            x,
+            y,
+            window_open: open,
+            window_close: close,
+            service_time: 1,
+        }
+    }
+
+    fn req(customers: Vec<Customer>, due: i64, time_limit: f64) -> VrptwRequest {
+        VrptwRequest {
+            id: "v".into(),
+            depot: Depot {
+                x: 0.0,
+                y: 0.0,
+                ready_time: 0,
+                due_time: due,
+            },
+            customers,
+            time_limit_seconds: time_limit,
+        }
+    }
+
+    #[test]
+    fn small_tour_optimal() {
+        let r = req(
+            vec![
+                customer(1, 1.0, 0.0, 0, 50),
+                customer(2, 2.0, 0.0, 0, 50),
+                customer(3, 3.0, 0.0, 0, 50),
+            ],
+            200,
+            5.0,
+        );
+        let plan = solve_cpsat_vrptw(&r);
+        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.customers_visited, 3);
+        assert!(plan.return_time > 0);
+        assert!(plan.total_distance > 0.0);
+    }
+
+    #[test]
+    fn skips_unreachable_customer_via_self_loop() {
+        // Customer 2 has impossible window — solver must skip via self-loop.
+        let r = req(
+            vec![
+                customer(1, 1.0, 0.0, 0, 50),
+                customer(2, 100.0, 100.0, 0, 1), // unreachable
+            ],
+            200,
+            5.0,
+        );
+        let plan = solve_cpsat_vrptw(&r);
+        assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
+        // At least one customer skipped; visit count <= 1.
+        assert!(plan.customers_visited <= 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal() {
+        let r = req(vec![customer(1, 1.0, 0.0, 0, 50)], 200, 1.0);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty().with_seed("vrptw-request:v", &body);
+        let s = CpSatVrptwSuggestor;
+        assert_eq!(s.name(), "CpSatVrptwSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_when_plan_present() {
+        let r = req(vec![customer(1, 1.0, 0.0, 0, 50)], 200, 1.0);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed("vrptw-request:v", &body)
+            .with_strategy("vrptw-plan-cpsat:v", "{}");
+        let s = CpSatVrptwSuggestor;
+        assert!(!s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_handles_malformed_seed() {
+        let ctx = MockContext::empty().with_seed("vrptw-request:bad", "not json");
+        let s = CpSatVrptwSuggestor;
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    /// Stress: 40-customer Solomon-style RC2-class instance with tight
+    /// individual time windows but a long depot horizon. CP-SAT's AddCircuit
+    /// with Big-M time propagation scales poorly past ~30 customers — this
+    /// instance reliably consumes the 30 s budget.
+    #[test]
+    fn stress_30s_vrptw_40_customers() {
+        let n = 40;
+        let mut state: u64 = 0xCAFE_BABE_FACE_DEAD;
+        let next = |s: &mut u64| -> u64 {
+            *s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            *s
+        };
+        let customers: Vec<_> = (1..=n)
+            .map(|i| {
+                let x = f64::from(((next(&mut state) >> 33) & 0x7F) as u32);
+                let y = f64::from(((next(&mut state) >> 33) & 0x7F) as u32);
+                // Random tight time window of width ~120 inside [0, 800].
+                let open = ((next(&mut state) >> 33) & 0x1FF) as i64;
+                let close = open + 120 + ((next(&mut state) >> 33) & 0x3F) as i64;
+                customer(i, x, y, open, close)
+            })
+            .collect();
+        let r = req(customers, 1_500, 30.0);
+        let started = std::time::Instant::now();
+        let plan = solve_cpsat_vrptw(&r);
+        let elapsed = started.elapsed().as_secs_f64();
+        assert!(
+            matches!(plan.status.as_str(), "optimal" | "feasible"),
+            "stress should yield a feasible VRPTW plan, got {} in {elapsed:.1}s",
+            plan.status
+        );
+        assert_eq!(plan.customers_total, n);
+        assert!(plan.customers_visited > 0);
     }
 }

@@ -53,6 +53,24 @@ just deps        # build native solver dependencies
 just doc         # generate docs
 ```
 
+Ferrox earns its keep through provable optimality, but native solver builds are
+not free. A first-time clone should budget 15-30 minutes for the OR-Tools C++
+compile before OR-Tools-backed CP-SAT checks can run. HiGHS also needs a native
+build for MIP checks:
+
+```sh
+make ortools
+make highs
+```
+
+Downstream repos, CI jobs, and contributors that build Ferrox from outside this
+workspace must point the sys crates at those build directories:
+
+```sh
+export FERROX_ORTOOLS_ROOT=/path/to/ferrox-solvers/vendor/ortools/build
+export FERROX_HIGHS_ROOT=/path/to/ferrox-solvers/vendor/highs/build
+```
+
 Project docs:
 
 - [AGENTS.md](AGENTS.md) - agent entrypoint and boundary rules.

@@ -1,6 +1,9 @@
 pub mod error;
 pub(crate) mod serde_util;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 #[cfg(feature = "ortools")]
 pub mod cp;
 #[cfg(feature = "ortools")]

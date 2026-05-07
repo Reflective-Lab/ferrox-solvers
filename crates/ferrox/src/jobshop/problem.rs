@@ -65,3 +65,50 @@ pub struct JobShopPlan {
     pub status: String,
     pub wall_time_seconds: f64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn horizon_zero_when_no_jobs() {
+        let r = JobShopRequest {
+            id: "r".into(),
+            jobs: vec![],
+            num_machines: 1,
+            time_limit_seconds: 1.0,
+        };
+        assert_eq!(r.horizon(), 0);
+    }
+
+    #[test]
+    fn horizon_sums_durations() {
+        let r = JobShopRequest {
+            id: "r".into(),
+            jobs: vec![Job {
+                id: 0,
+                name: "j".into(),
+                operations: vec![
+                    Operation {
+                        machine_id: 0,
+                        duration: 4,
+                    },
+                    Operation {
+                        machine_id: 1,
+                        duration: 6,
+                    },
+                ],
+            }],
+            num_machines: 2,
+            time_limit_seconds: 1.0,
+        };
+        assert_eq!(r.horizon(), 10);
+    }
+
+    #[test]
+    fn request_default_time_limit() {
+        let json = r#"{"id":"r","jobs":[],"num_machines":1}"#;
+        let r: JobShopRequest = serde_json::from_str(json).unwrap();
+        assert!((r.time_limit_seconds - 30.0).abs() < f64::EPSILON);
+    }
+}

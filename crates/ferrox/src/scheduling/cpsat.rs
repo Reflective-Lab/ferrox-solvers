@@ -26,7 +26,7 @@ use super::greedy::REQUEST_PREFIX;
 /// **Confidence:**
 /// - `optimal` status + 100% throughput → 1.0
 /// - `optimal` status + partial throughput → throughput ratio (resource-limited)
-/// - `feasible` status → throughput_ratio × 0.85 (time budget exhausted)
+/// - `feasible` status → `throughput_ratio` × 0.85 (time budget exhausted)
 /// - `infeasible` → 0.0
 ///
 /// [`GreedySchedulerSuggestor`]: super::greedy::GreedySchedulerSuggestor
@@ -34,7 +34,7 @@ pub struct CpSatSchedulerSuggestor;
 
 #[async_trait]
 impl Suggestor for CpSatSchedulerSuggestor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "CpSatSchedulerSuggestor"
     }
 
@@ -113,8 +113,9 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 
 // ── Solver ────────────────────────────────────────────────────────────────────
 
-/// Maximise tasks scheduled subject to agent-capacity (NoOverlap) and
+/// Maximise tasks scheduled subject to agent-capacity (`NoOverlap`) and
 /// time-window constraints.  Returns a [`SchedulingPlan`] with full assignments.
+#[allow(clippy::too_many_lines)]
 pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     let t0 = Instant::now();
 
@@ -229,20 +230,20 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
             .filter(|a| a.capabilities.contains(&task.required_capability))
         {
             let x_name = x_var_name(task.id, agent.id);
-            if let Some(&x_idx) = bool_name_to_idx.get(&x_name) {
-                if solution.value(x_idx) == 1 {
-                    let s_idx = name_to_idx[&start_name(task)];
-                    let start = solution.value(s_idx);
-                    assignments.push(TaskAssignment {
-                        task_id: task.id,
-                        task_name: task.name.clone(),
-                        agent_id: agent.id,
-                        agent_name: agent.name.clone(),
-                        start_min: start,
-                        end_min: start + task.duration_min,
-                    });
-                    break;
-                }
+            if let Some(&x_idx) = bool_name_to_idx.get(&x_name)
+                && solution.value(x_idx) == 1
+            {
+                let s_idx = name_to_idx[&start_name(task)];
+                let start = solution.value(s_idx);
+                assignments.push(TaskAssignment {
+                    task_id: task.id,
+                    task_name: task.name.clone(),
+                    agent_id: agent.id,
+                    agent_name: agent.name.clone(),
+                    start_min: start,
+                    end_min: start + task.duration_min,
+                });
+                break;
             }
         }
     }
@@ -276,4 +277,170 @@ fn x_var_name(task_id: usize, agent_id: usize) -> String {
 }
 fn ov_var_name(task_id: usize, agent_id: usize) -> String {
     format!("ov_{task_id}_{agent_id}")
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::doc_markdown,
+    clippy::similar_names
+)]
+mod tests {
+    use super::*;
+    use crate::scheduling::problem::{SchedulingAgent, SchedulingTask};
+    use crate::test_support::MockContext;
+
+    fn agent(id: usize, caps: &[&str]) -> SchedulingAgent {
+        SchedulingAgent {
+            id,
+            name: format!("a{id}"),
+            capabilities: caps.iter().map(|s| (*s).into()).collect(),
+        }
+    }
+
+    fn task(id: usize, cap: &str, duration: i64, release: i64, deadline: i64) -> SchedulingTask {
+        SchedulingTask {
+            id,
+            name: format!("t{id}"),
+            required_capability: cap.into(),
+            duration_min: duration,
+            release_min: release,
+            deadline_min: deadline,
+        }
+    }
+
+    fn req(tasks: Vec<SchedulingTask>, agents: Vec<SchedulingAgent>) -> SchedulingRequest {
+        SchedulingRequest {
+            id: "r".into(),
+            agents,
+            tasks,
+            horizon_min: 480,
+            time_limit_seconds: 5.0,
+        }
+    }
+
+    #[test]
+    fn small_instance_optimal() {
+        let r = req(
+            vec![
+                task(1, "py", 30, 0, 60),
+                task(2, "py", 30, 0, 120),
+                task(3, "py", 30, 60, 120),
+            ],
+            vec![agent(0, &["py"])],
+        );
+        let plan = solve_cpsat(&r);
+        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.tasks_scheduled, 3);
+        assert_eq!(plan.solver, "cp-sat-v9.15");
+        for a in &plan.assignments {
+            assert!(a.end_min - a.start_min == 30);
+        }
+    }
+
+    #[test]
+    fn unschedulable_task_drops_to_zero() {
+        // duration > deadline; bound math is degenerate so the model is rejected.
+        let r = req(vec![task(1, "py", 100, 0, 30)], vec![agent(0, &["py"])]);
+        let plan = solve_cpsat(&r);
+        assert_eq!(plan.tasks_scheduled, 0);
+    }
+
+    #[test]
+    fn capability_routing() {
+        let r = req(
+            vec![task(1, "rs", 10, 0, 60), task(2, "py", 10, 0, 60)],
+            vec![agent(0, &["py"]), agent(1, &["rs"])],
+        );
+        let plan = solve_cpsat(&r);
+        assert_eq!(plan.tasks_scheduled, 2);
+        let by_id: HashMap<_, _> = plan
+            .assignments
+            .iter()
+            .map(|a| (a.task_id, a.agent_id))
+            .collect();
+        assert_eq!(by_id[&1], 1);
+        assert_eq!(by_id[&2], 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal() {
+        let r = req(vec![task(1, "py", 10, 0, 60)], vec![agent(0, &["py"])]);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty().with_seed("scheduling-request:r", &body);
+        let s = CpSatSchedulerSuggestor;
+        assert_eq!(s.name(), "CpSatSchedulerSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_when_plan_present() {
+        let r = req(vec![task(1, "py", 10, 0, 60)], vec![agent(0, &["py"])]);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed("scheduling-request:r", &body)
+            .with_strategy("scheduling-plan-cpsat:r", "{}");
+        let s = CpSatSchedulerSuggestor;
+        assert!(!s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_handles_malformed_seed() {
+        let ctx = MockContext::empty().with_seed("scheduling-request:bad", "not json");
+        let s = CpSatSchedulerSuggestor;
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    /// Stress: 250 tasks across 8 agents with tight time windows and high
+    /// contention on a shared capability. Optional-interval NoOverlap on each
+    /// agent generates a deep search space — designed to consume the 30 s budget.
+    #[test]
+    fn stress_30s_250_tasks_tight_windows() {
+        let caps = ["py", "rs", "ml"];
+        // Few agents, narrow capability coverage → high resource contention.
+        let agents: Vec<_> = (0..8).map(|i| agent(i, &[caps[i % caps.len()]])).collect();
+        let n_tasks = 250;
+        let mut state: u64 = 0xDEAD_BEEF_F00D_F00D;
+        let step = |s: &mut u64| -> i64 {
+            *s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            ((*s >> 33) & 0x3F) as i64
+        };
+        let tasks: Vec<_> = (0..n_tasks)
+            .map(|i| {
+                let cap = caps[i % caps.len()];
+                let release = step(&mut state) * 5;
+                // Narrow deadline window forces overlap conflicts.
+                let duration = 20 + step(&mut state) % 30;
+                let slack = 30 + step(&mut state) % 60;
+                let deadline = release + duration + slack;
+                task(i, cap, duration, release, deadline)
+            })
+            .collect();
+        let r = SchedulingRequest {
+            id: "stress".into(),
+            agents,
+            tasks,
+            horizon_min: 2_000,
+            time_limit_seconds: 30.0,
+        };
+        let started = std::time::Instant::now();
+        let plan = solve_cpsat(&r);
+        let elapsed = started.elapsed().as_secs_f64();
+        assert!(
+            matches!(plan.status.as_str(), "optimal" | "feasible"),
+            "stress should yield a feasible scheduling plan, got {} in {elapsed:.1}s",
+            plan.status
+        );
+        assert!(plan.tasks_scheduled > 0);
+        for a in &plan.assignments {
+            assert!(a.end_min > a.start_min);
+        }
+    }
 }

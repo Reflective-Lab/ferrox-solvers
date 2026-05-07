@@ -23,7 +23,7 @@ pub struct GreedyJobShopSuggestor;
 
 #[async_trait]
 impl Suggestor for GreedyJobShopSuggestor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "GreedyJobShopSuggestor"
     }
 
@@ -95,6 +95,7 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 }
 
 /// SPT list scheduling: repeatedly dispatch the shortest ready operation per machine.
+#[allow(clippy::needless_range_loop)]
 pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
     let t0 = Instant::now();
     let n = req.jobs.len();
@@ -198,5 +199,131 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
         solver: "greedy-spt".to_string(),
         status: "feasible".to_string(),
         wall_time_seconds: t0.elapsed().as_secs_f64(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jobshop::problem::{Job, Operation};
+    use crate::test_support::MockContext;
+    use converge_pack::Suggestor;
+
+    fn op(machine: usize, dur: i64) -> Operation {
+        Operation {
+            machine_id: machine,
+            duration: dur,
+        }
+    }
+
+    fn job(id: usize, name: &str, ops: Vec<Operation>) -> Job {
+        Job {
+            id,
+            name: name.into(),
+            operations: ops,
+        }
+    }
+
+    fn req(jobs: Vec<Job>, m: usize) -> JobShopRequest {
+        JobShopRequest {
+            id: "j1".into(),
+            jobs,
+            num_machines: m,
+            time_limit_seconds: 1.0,
+        }
+    }
+
+    #[test]
+    fn empty_request_returns_zero_makespan() {
+        let r = req(vec![], 1);
+        let plan = solve_greedy(&r);
+        assert_eq!(plan.makespan, 0);
+        assert_eq!(plan.schedule.len(), 0);
+        assert_eq!(plan.solver, "greedy-spt");
+    }
+
+    #[test]
+    fn single_job_two_ops_serial() {
+        let r = req(vec![job(0, "j0", vec![op(0, 5), op(1, 3)])], 2);
+        let plan = solve_greedy(&r);
+        assert_eq!(plan.schedule.len(), 2);
+        assert_eq!(plan.makespan, 8);
+        assert_eq!(plan.schedule[0].start, 0);
+        assert_eq!(plan.schedule[0].end, 5);
+        assert_eq!(plan.schedule[1].start, 5);
+        assert_eq!(plan.schedule[1].end, 8);
+    }
+
+    #[test]
+    fn spt_prefers_shorter_op_on_same_machine() {
+        let r = req(
+            vec![
+                job(0, "long", vec![op(0, 10)]),
+                job(1, "short", vec![op(0, 2)]),
+            ],
+            1,
+        );
+        let plan = solve_greedy(&r);
+        assert_eq!(plan.schedule.len(), 2);
+        // SPT: shorter goes first
+        assert_eq!(plan.schedule[0].job_id, 1);
+        assert_eq!(plan.schedule[1].job_id, 0);
+    }
+
+    #[test]
+    fn parallel_machines_run_concurrently() {
+        let r = req(
+            vec![job(0, "ja", vec![op(0, 4)]), job(1, "jb", vec![op(1, 3)])],
+            2,
+        );
+        let plan = solve_greedy(&r);
+        assert_eq!(plan.makespan, 4);
+    }
+
+    #[test]
+    fn horizon_sums_all_durations() {
+        let r = req(
+            vec![
+                job(0, "j", vec![op(0, 3), op(1, 4)]),
+                job(1, "k", vec![op(0, 2)]),
+            ],
+            2,
+        );
+        assert_eq!(r.horizon(), 9);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal() {
+        let r = req(vec![job(0, "j0", vec![op(0, 5)])], 1);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}j1"), &body);
+        let s = GreedyJobShopSuggestor;
+        assert_eq!(s.name(), "GreedyJobShopSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_when_plan_present() {
+        let r = req(vec![job(0, "j0", vec![op(0, 5)])], 1);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed(&format!("{REQUEST_PREFIX}j1"), &body)
+            .with_strategy("jspbench-plan-greedy:j1", "{}");
+        let s = GreedyJobShopSuggestor;
+        assert!(!s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_malformed_seed() {
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}bad"), "{not json");
+        let s = GreedyJobShopSuggestor;
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
     }
 }

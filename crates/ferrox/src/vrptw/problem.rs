@@ -85,10 +85,70 @@ pub struct VrptwPlan {
 }
 
 impl VrptwPlan {
+    #[allow(clippy::cast_precision_loss)]
     pub fn visit_ratio(&self) -> f64 {
         if self.customers_total == 0 {
             return 0.0;
         }
         self.customers_visited as f64 / self.customers_total as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cust(x: f64, y: f64) -> Customer {
+        Customer {
+            id: 1,
+            name: "c".into(),
+            x,
+            y,
+            window_open: 0,
+            window_close: 100,
+            service_time: 1,
+        }
+    }
+
+    #[test]
+    fn customer_travel_is_euclidean() {
+        let a = cust(0.0, 0.0);
+        let b = cust(3.0, 4.0);
+        assert!((a.travel_to(&b) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn depot_travel_to_customer_is_euclidean() {
+        let d = Depot {
+            x: 0.0,
+            y: 0.0,
+            ready_time: 0,
+            due_time: 100,
+        };
+        assert!((d.travel_to_customer(&cust(0.0, 5.0)) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn visit_ratio_zero_when_no_customers() {
+        let p = VrptwPlan {
+            request_id: "r".into(),
+            route: vec![],
+            customers_total: 0,
+            customers_visited: 0,
+            total_distance: 0.0,
+            return_time: 0,
+            solver: "x".into(),
+            status: "feasible".into(),
+            wall_time_seconds: 0.0,
+        };
+        assert!((p.visit_ratio() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn request_default_time_limit() {
+        let json =
+            r#"{"id":"r","depot":{"x":0,"y":0,"ready_time":0,"due_time":100},"customers":[]}"#;
+        let r: VrptwRequest = serde_json::from_str(json).unwrap();
+        assert!((r.time_limit_seconds - 30.0).abs() < f64::EPSILON);
     }
 }

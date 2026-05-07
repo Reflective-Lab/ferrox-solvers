@@ -24,7 +24,7 @@ pub struct GreedySchedulerSuggestor;
 
 #[async_trait]
 impl Suggestor for GreedySchedulerSuggestor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "GreedySchedulerSuggestor"
     }
 
@@ -144,5 +144,171 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
         solver: "greedy-edf".to_string(),
         status: "feasible".to_string(),
         wall_time_seconds: t0.elapsed().as_secs_f64(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scheduling::problem::{SchedulingAgent, SchedulingTask};
+    use crate::test_support::MockContext;
+    use converge_pack::Suggestor;
+
+    fn agent(id: usize, name: &str, caps: &[&str]) -> SchedulingAgent {
+        SchedulingAgent {
+            id,
+            name: name.into(),
+            capabilities: caps.iter().map(|s| (*s).into()).collect(),
+        }
+    }
+
+    fn task(
+        id: usize,
+        name: &str,
+        cap: &str,
+        duration: i64,
+        release: i64,
+        deadline: i64,
+    ) -> SchedulingTask {
+        SchedulingTask {
+            id,
+            name: name.into(),
+            required_capability: cap.into(),
+            duration_min: duration,
+            release_min: release,
+            deadline_min: deadline,
+        }
+    }
+
+    fn req_with(tasks: Vec<SchedulingTask>, agents: Vec<SchedulingAgent>) -> SchedulingRequest {
+        SchedulingRequest {
+            id: "r1".into(),
+            agents,
+            tasks,
+            horizon_min: 480,
+            time_limit_seconds: 1.0,
+        }
+    }
+
+    #[test]
+    fn empty_request_yields_empty_plan() {
+        let req = req_with(vec![], vec![]);
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.tasks_total, 0);
+        assert_eq!(plan.tasks_scheduled, 0);
+        assert_eq!(plan.makespan_min, 0);
+        assert!((plan.throughput_ratio() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn single_capable_agent_schedules_in_order() {
+        let req = req_with(
+            vec![
+                task(1, "t1", "py", 30, 0, 60),
+                task(2, "t2", "py", 30, 0, 120),
+            ],
+            vec![agent(0, "alice", &["py"])],
+        );
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.tasks_scheduled, 2);
+        assert_eq!(plan.makespan_min, 60);
+        assert_eq!(plan.assignments[0].task_id, 1);
+        assert!((plan.throughput_ratio() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn drops_task_with_unsatisfiable_deadline() {
+        let req = req_with(
+            vec![task(1, "tight", "py", 100, 0, 30)],
+            vec![agent(0, "alice", &["py"])],
+        );
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.tasks_scheduled, 0);
+        assert_eq!(plan.tasks_total, 1);
+    }
+
+    #[test]
+    fn skips_task_when_no_capable_agent() {
+        let req = req_with(
+            vec![task(1, "rs-only", "rust", 30, 0, 120)],
+            vec![agent(0, "alice", &["py"])],
+        );
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.tasks_scheduled, 0);
+    }
+
+    #[test]
+    fn picks_earliest_available_agent() {
+        let req = req_with(
+            vec![
+                task(1, "t1", "py", 60, 0, 120),
+                task(2, "t2", "py", 30, 0, 120),
+            ],
+            vec![agent(0, "alice", &["py"]), agent(1, "bob", &["py"])],
+        );
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.tasks_scheduled, 2);
+        let agents: std::collections::HashSet<_> =
+            plan.assignments.iter().map(|a| a.agent_id).collect();
+        assert_eq!(agents.len(), 2, "should distribute across both agents");
+    }
+
+    #[test]
+    fn release_time_delays_start() {
+        let req = req_with(
+            vec![task(1, "t1", "py", 30, 100, 200)],
+            vec![agent(0, "alice", &["py"])],
+        );
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.assignments[0].start_min, 100);
+        assert_eq!(plan.assignments[0].end_min, 130);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal_for_seed() {
+        let req = req_with(
+            vec![task(1, "t1", "py", 30, 0, 60)],
+            vec![agent(0, "alice", &["py"])],
+        );
+        let body = serde_json::to_string(&req).unwrap();
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}r1"), &body);
+        let s = GreedySchedulerSuggestor;
+        assert_eq!(s.name(), "GreedySchedulerSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let effect = s.execute(&ctx).await;
+        assert_eq!(effect.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_if_plan_already_present() {
+        let req = req_with(
+            vec![task(1, "t1", "py", 30, 0, 60)],
+            vec![agent(0, "alice", &["py"])],
+        );
+        let body = serde_json::to_string(&req).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed(&format!("{REQUEST_PREFIX}r1"), &body)
+            .with_strategy("scheduling-plan-greedy:r1", "{}");
+        let s = GreedySchedulerSuggestor;
+        assert!(!s.accepts(&ctx));
+        let effect = s.execute(&ctx).await;
+        assert_eq!(effect.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_handles_malformed_seed() {
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}bad"), "not json");
+        let s = GreedySchedulerSuggestor;
+        let effect = s.execute(&ctx).await;
+        assert_eq!(effect.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_ignores_other_seed_prefixes() {
+        let ctx = MockContext::empty().with_seed("unrelated:r1", "{}");
+        let s = GreedySchedulerSuggestor;
+        assert!(!s.accepts(&ctx));
     }
 }

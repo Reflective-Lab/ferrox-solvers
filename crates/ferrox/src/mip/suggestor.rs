@@ -175,3 +175,246 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
         solver: "highs-v1.14.0".to_string(),
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::mistyped_literal_suffixes,
+    clippy::unreadable_literal
+)]
+mod tests {
+    use super::*;
+    use crate::mip::problem::{MipConstraint, MipObjective, MipTerm, MipVariable, VarKind};
+    use crate::test_support::MockContext;
+
+    fn binary(name: &str) -> MipVariable {
+        MipVariable {
+            name: name.into(),
+            lb: 0.0,
+            ub: 1.0,
+            kind: VarKind::Binary,
+        }
+    }
+
+    fn cont(name: &str, lb: f64, ub: f64) -> MipVariable {
+        MipVariable {
+            name: name.into(),
+            lb,
+            ub,
+            kind: VarKind::Continuous,
+        }
+    }
+
+    fn term(var: &str, coeff: f64) -> MipTerm {
+        MipTerm {
+            var: var.into(),
+            coeff,
+        }
+    }
+
+    fn knapsack(n: usize, capacity: f64, weights: &[f64], values: &[f64]) -> MipRequest {
+        let variables: Vec<_> = (0..n).map(|i| binary(&format!("x{i}"))).collect();
+        let weight_terms: Vec<_> = (0..n).map(|i| term(&format!("x{i}"), weights[i])).collect();
+        let value_terms: Vec<_> = (0..n).map(|i| term(&format!("x{i}"), values[i])).collect();
+
+        MipRequest {
+            id: "kp".into(),
+            variables,
+            constraints: vec![MipConstraint {
+                name: "cap".into(),
+                lb: f64::NEG_INFINITY,
+                ub: capacity,
+                terms: weight_terms,
+            }],
+            objective: MipObjective {
+                terms: value_terms,
+                maximize: true,
+            },
+            time_limit_seconds: Some(2.0),
+            mip_gap_tolerance: None,
+        }
+    }
+
+    #[test]
+    fn solves_small_knapsack_optimally() {
+        let req = knapsack(4, 10.0, &[2.0, 3.0, 4.0, 5.0], &[3.0, 4.0, 5.0, 6.0]);
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "optimal");
+        assert!(plan.objective_value > 0.0);
+        assert_eq!(plan.values.len(), 4);
+    }
+
+    #[test]
+    fn continuous_lp_via_mip_path() {
+        // pure-continuous problem: max x s.t. x + y <= 4, x,y in [0, 5]
+        let req = MipRequest {
+            id: "lp".into(),
+            variables: vec![cont("x", 0.0, 5.0), cont("y", 0.0, 5.0)],
+            constraints: vec![MipConstraint {
+                name: "c".into(),
+                lb: f64::NEG_INFINITY,
+                ub: 4.0,
+                terms: vec![term("x", 1.0), term("y", 1.0)],
+            }],
+            objective: MipObjective {
+                terms: vec![term("x", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: None,
+        };
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "optimal");
+        assert!((plan.objective_value - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn integer_var_path() {
+        // integer variable with explicit kind exercises add_int_col.
+        let req = MipRequest {
+            id: "int".into(),
+            variables: vec![MipVariable {
+                name: "x".into(),
+                lb: 0.0,
+                ub: 10.0,
+                kind: VarKind::Integer,
+            }],
+            constraints: vec![MipConstraint {
+                name: "c".into(),
+                lb: f64::NEG_INFINITY,
+                ub: 7.5,
+                terms: vec![term("x", 1.0)],
+            }],
+            objective: MipObjective {
+                terms: vec![term("x", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: Some(0.001),
+        };
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "optimal");
+        let map: HashMap<_, _> = plan.values.iter().cloned().collect();
+        assert!((map["x"] - 7.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn detects_infeasible_mip() {
+        let req = MipRequest {
+            id: "inf".into(),
+            variables: vec![binary("x")],
+            constraints: vec![MipConstraint {
+                name: "low".into(),
+                lb: 2.0,
+                ub: f64::INFINITY,
+                terms: vec![term("x", 1.0)],
+            }],
+            objective: MipObjective {
+                terms: vec![term("x", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: None,
+        };
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "infeasible");
+        assert!(plan.mip_gap.is_infinite());
+        assert_eq!(plan.values.len(), 0);
+    }
+
+    #[test]
+    fn minimize_path() {
+        // min x s.t. x >= 3, x in [0,10]; optimal x=3, obj=3.
+        let req = MipRequest {
+            id: "min".into(),
+            variables: vec![cont("x", 0.0, 10.0)],
+            constraints: vec![MipConstraint {
+                name: "c".into(),
+                lb: 3.0,
+                ub: f64::INFINITY,
+                terms: vec![term("x", 1.0)],
+            }],
+            objective: MipObjective {
+                terms: vec![term("x", 1.0)],
+                maximize: false,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: None,
+        };
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "optimal");
+        assert!((plan.objective_value - 3.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal() {
+        let req = knapsack(3, 5.0, &[1.0, 2.0, 3.0], &[5.0, 4.0, 3.0]);
+        let body = serde_json::to_string(&req).unwrap();
+        let ctx = MockContext::empty().with_seed("mip-request:kp", &body);
+        let s = HighsMipSuggestor;
+        assert_eq!(s.name(), "HighsMipSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_when_plan_present() {
+        let req = knapsack(2, 5.0, &[1.0, 2.0], &[5.0, 4.0]);
+        let body = serde_json::to_string(&req).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed("mip-request:kp", &body)
+            .with_strategy("mip-plan:kp", "{}");
+        let s = HighsMipSuggestor;
+        assert!(!s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_handles_malformed_seed() {
+        let ctx = MockContext::empty().with_seed("mip-request:bad", "not json");
+        let s = HighsMipSuggestor;
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    /// Stress: 30-second budget on a strongly-correlated 0/1 knapsack with
+    /// 1000 items. Pisinger-style hard instances require value = weight + R
+    /// to defeat the LP relaxation bound; HiGHS's branch-and-cut must explore
+    /// a substantial part of the tree to prove optimality.
+    #[test]
+    fn stress_30s_correlated_knapsack_1000() {
+        let n: usize = 1_000;
+        let mut state: u64 = 0xFEEDFACE_DEADBEEF;
+        let step = |s: &mut u64| -> u64 {
+            *s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            *s
+        };
+        // Strongly correlated: weights uniform in [50, 250]; values = weight + 10.
+        let weights: Vec<f64> = (0..n)
+            .map(|_| f64::from(((step(&mut state) >> 33) & 0xFF) as u32) + 50.0)
+            .collect();
+        let values: Vec<f64> = weights.iter().map(|w| w + 10.0).collect();
+        // Tight capacity: 30% of total weight forces hard packing decisions.
+        let capacity: f64 = weights.iter().sum::<f64>() * 0.30;
+
+        let mut req = knapsack(n, capacity, &weights, &values);
+        req.id = "stress".into();
+        req.time_limit_seconds = Some(30.0);
+        req.mip_gap_tolerance = Some(0.0); // demand provable optimality
+
+        let started = std::time::Instant::now();
+        let plan = solve_mip(&req);
+        let elapsed = started.elapsed().as_secs_f64();
+        assert!(
+            matches!(plan.status.as_str(), "optimal" | "feasible"),
+            "stress should yield a feasible MIP solution, got {} in {elapsed:.1}s",
+            plan.status
+        );
+        assert_eq!(plan.values.len(), n);
+        assert!(plan.objective_value > 0.0);
+    }
+}

@@ -30,7 +30,7 @@ pub struct CpSatJobShopSuggestor;
 
 #[async_trait]
 impl Suggestor for CpSatJobShopSuggestor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "CpSatJobShopSuggestor"
     }
 
@@ -223,5 +223,145 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
         solver: "cp-sat-v9.15".to_string(),
         status: status.to_string(),
         wall_time_seconds: elapsed,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::cast_possible_wrap, clippy::similar_names)]
+mod tests {
+    use super::*;
+    use crate::jobshop::problem::{Job, Operation};
+    use crate::test_support::MockContext;
+
+    fn op(machine: usize, dur: i64) -> Operation {
+        Operation {
+            machine_id: machine,
+            duration: dur,
+        }
+    }
+
+    fn job(id: usize, ops: Vec<Operation>) -> Job {
+        Job {
+            id,
+            name: format!("j{id}"),
+            operations: ops,
+        }
+    }
+
+    fn req(jobs: Vec<Job>, m: usize, time_limit: f64) -> JobShopRequest {
+        JobShopRequest {
+            id: "j".into(),
+            jobs,
+            num_machines: m,
+            time_limit_seconds: time_limit,
+        }
+    }
+
+    #[test]
+    fn small_instance_optimal() {
+        let r = req(
+            vec![
+                job(0, vec![op(0, 3), op(1, 2)]),
+                job(1, vec![op(1, 4), op(0, 1)]),
+            ],
+            2,
+            5.0,
+        );
+        let plan = solve_cpsat_jsp(&r);
+        assert_eq!(plan.status, "optimal");
+        assert!(plan.lower_bound.is_some());
+        // Optimal makespan for this 2x2 instance is 6.
+        assert_eq!(plan.makespan, 6);
+        assert_eq!(plan.schedule.len(), 4);
+    }
+
+    #[test]
+    fn cpsat_beats_or_matches_greedy_on_small_instance() {
+        let jobs = vec![
+            job(0, vec![op(0, 3), op(1, 2), op(2, 4)]),
+            job(1, vec![op(1, 5), op(0, 3), op(2, 1)]),
+            job(2, vec![op(2, 2), op(1, 4), op(0, 3)]),
+        ];
+        let r = req(jobs, 3, 10.0);
+        let opt = solve_cpsat_jsp(&r);
+        let g = crate::jobshop::greedy::solve_greedy(&r);
+        assert!(opt.makespan <= g.makespan);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal() {
+        let r = req(vec![job(0, vec![op(0, 3)])], 1, 1.0);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty().with_seed("jspbench-request:j", &body);
+        let s = CpSatJobShopSuggestor;
+        assert_eq!(s.name(), "CpSatJobShopSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_when_plan_present() {
+        let r = req(vec![job(0, vec![op(0, 3)])], 1, 1.0);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed("jspbench-request:j", &body)
+            .with_strategy("jspbench-plan-cpsat:j", "{}");
+        let s = CpSatJobShopSuggestor;
+        assert!(!s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_handles_malformed_seed() {
+        let ctx = MockContext::empty().with_seed("jspbench-request:bad", "not json");
+        let s = CpSatJobShopSuggestor;
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    /// Stress: Taillard 20×15 — a notoriously hard JSP benchmark size.
+    /// 300 operations with random machine permutations and durations in
+    /// [10, 80]. CP-SAT typically uses the full 30 s budget and may not
+    /// prove optimality; the test verifies feasibility only.
+    #[test]
+    fn stress_30s_jobshop_20x15() {
+        let n_jobs = 20;
+        let n_machines = 15;
+        let mut state: u64 = 0x1234_5678_ABCD_EF01;
+        let step = |s: &mut u64| -> u64 {
+            *s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            *s
+        };
+        let mut jobs: Vec<Job> = Vec::with_capacity(n_jobs);
+        for j in 0..n_jobs {
+            let mut perm: Vec<usize> = (0..n_machines).collect();
+            for i in (1..n_machines).rev() {
+                let r = (step(&mut state) >> 33) as usize % (i + 1);
+                perm.swap(i, r);
+            }
+            let ops = perm
+                .into_iter()
+                .map(|m| {
+                    let dur = ((step(&mut state) >> 33) & 0x7F) as i64 + 10;
+                    op(m, dur)
+                })
+                .collect();
+            jobs.push(job(j, ops));
+        }
+        let r = req(jobs, n_machines, 30.0);
+        let started = std::time::Instant::now();
+        let plan = solve_cpsat_jsp(&r);
+        let elapsed = started.elapsed().as_secs_f64();
+        assert!(
+            matches!(plan.status.as_str(), "optimal" | "feasible"),
+            "stress should yield a feasible job-shop plan, got {} in {elapsed:.1}s",
+            plan.status
+        );
+        assert_eq!(plan.schedule.len(), n_jobs * n_machines);
+        assert!(plan.makespan > 0);
     }
 }

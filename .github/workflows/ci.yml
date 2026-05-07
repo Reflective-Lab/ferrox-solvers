@@ -11,7 +11,7 @@ env:
   RUST_VERSION: "1.94.0"
   # ferrox-server requires compiled C++ solver libs — excluded from CI.
   # Solver integration is validated locally with `just example-*`.
-  EXCLUDES: --exclude ferrox-server
+  EXCLUDES: --exclude converge-ferrox-server
 
 jobs:
   check:

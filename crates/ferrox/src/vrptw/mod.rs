@@ -8,7 +8,7 @@
 //! | Suggestor | Algorithm | Confidence | Latency |
 //! |---|---|---|---|
 //! | [`NearestNeighborSuggestor`] | Nearest-neighbour heuristic | ≤ 0.60 | sub-ms |
-//! | [`CpSatVrptwSuggestor`] | CP-SAT AddCircuit + time vars | 1.0 optimal | seconds |
+//! | [`CpSatVrptwSuggestor`] | CP-SAT `AddCircuit` + time vars | 1.0 optimal | seconds |
 //!
 //! # CP-SAT model
 //!

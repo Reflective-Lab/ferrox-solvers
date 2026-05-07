@@ -70,10 +70,48 @@ pub struct SchedulingPlan {
 
 impl SchedulingPlan {
     /// Throughput ratio: scheduled / total tasks.  Used to derive confidence.
+    #[allow(clippy::cast_precision_loss)]
     pub fn throughput_ratio(&self) -> f64 {
         if self.tasks_total == 0 {
             return 0.0;
         }
         self.tasks_scheduled as f64 / self.tasks_total as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_plan(tasks_total: usize, tasks_scheduled: usize) -> SchedulingPlan {
+        SchedulingPlan {
+            request_id: "r".into(),
+            assignments: vec![],
+            tasks_total,
+            tasks_scheduled,
+            makespan_min: 0,
+            solver: "x".into(),
+            status: "feasible".into(),
+            wall_time_seconds: 0.0,
+        }
+    }
+
+    #[test]
+    fn throughput_ratio_zero_when_no_tasks() {
+        let p = empty_plan(0, 0);
+        assert!((p.throughput_ratio() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn throughput_ratio_partial() {
+        let p = empty_plan(10, 7);
+        assert!((p.throughput_ratio() - 0.7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn request_serde_round_trip_with_default_time_limit() {
+        let json = r#"{"id":"r","agents":[],"tasks":[],"horizon_min":120}"#;
+        let r: SchedulingRequest = serde_json::from_str(json).unwrap();
+        assert!((r.time_limit_seconds - 30.0).abs() < f64::EPSILON);
     }
 }

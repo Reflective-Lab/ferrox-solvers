@@ -20,7 +20,7 @@ pub struct NearestNeighborSuggestor;
 
 #[async_trait]
 impl Suggestor for NearestNeighborSuggestor {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "NearestNeighborSuggestor"
     }
 
@@ -91,6 +91,7 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 }
 
 /// Nearest-neighbour TSP with time-window feasibility.
+#[allow(clippy::similar_names)]
 pub fn solve_nn(req: &VrptwRequest) -> VrptwPlan {
     let t0 = Instant::now();
     let n = req.customers.len();
@@ -168,5 +169,133 @@ pub fn solve_nn(req: &VrptwRequest) -> VrptwPlan {
         solver: "nearest-neighbour".to_string(),
         status: "feasible".to_string(),
         wall_time_seconds: t0.elapsed().as_secs_f64(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::MockContext;
+    use crate::vrptw::problem::{Customer, Depot};
+    use converge_pack::Suggestor;
+
+    fn customer(id: usize, x: f64, y: f64, open: i64, close: i64) -> Customer {
+        Customer {
+            id,
+            name: format!("c{id}"),
+            x,
+            y,
+            window_open: open,
+            window_close: close,
+            service_time: 1,
+        }
+    }
+
+    fn depot(due: i64) -> Depot {
+        Depot {
+            x: 0.0,
+            y: 0.0,
+            ready_time: 0,
+            due_time: due,
+        }
+    }
+
+    fn req(customers: Vec<Customer>, due: i64) -> VrptwRequest {
+        VrptwRequest {
+            id: "v1".into(),
+            depot: depot(due),
+            customers,
+            time_limit_seconds: 1.0,
+        }
+    }
+
+    #[test]
+    fn empty_customers_returns_to_depot() {
+        let r = req(vec![], 1000);
+        let plan = solve_nn(&r);
+        assert_eq!(plan.customers_visited, 0);
+        assert_eq!(plan.customers_total, 0);
+        assert_eq!(plan.return_time, 0);
+        assert!((plan.visit_ratio() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn travel_metric_is_euclidean() {
+        let a = customer(1, 3.0, 4.0, 0, 100);
+        let b = customer(2, 0.0, 0.0, 0, 100);
+        assert!((a.travel_to(&b) - 5.0).abs() < 1e-9);
+        let d = depot(100);
+        assert!((d.travel_to_customer(&a) - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn visits_reachable_customer() {
+        let r = req(vec![customer(1, 1.0, 0.0, 0, 100)], 1000);
+        let plan = solve_nn(&r);
+        assert_eq!(plan.customers_visited, 1);
+        assert!((plan.visit_ratio() - 1.0).abs() < f64::EPSILON);
+        assert!(plan.return_time > 0);
+    }
+
+    #[test]
+    fn skips_unreachable_due_to_window_close() {
+        let r = req(vec![customer(1, 1000.0, 0.0, 0, 1)], 100_000);
+        let plan = solve_nn(&r);
+        assert_eq!(plan.customers_visited, 0);
+    }
+
+    #[test]
+    fn skips_when_return_exceeds_due_time() {
+        let r = req(vec![customer(1, 100.0, 0.0, 0, 1000)], 50);
+        let plan = solve_nn(&r);
+        assert_eq!(plan.customers_visited, 0);
+    }
+
+    #[test]
+    fn picks_nearest_first() {
+        let r = req(
+            vec![
+                customer(1, 10.0, 0.0, 0, 100),
+                customer(2, 1.0, 0.0, 0, 100),
+            ],
+            1_000,
+        );
+        let plan = solve_nn(&r);
+        assert_eq!(plan.route[0].customer_id, 2);
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_proposal() {
+        let r = req(vec![customer(1, 1.0, 0.0, 0, 100)], 1000);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}v1"), &body);
+        let s = NearestNeighborSuggestor;
+        assert_eq!(s.name(), "NearestNeighborSuggestor");
+        assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
+        assert!(s.complexity_hint().is_some());
+        assert!(s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_when_plan_present() {
+        let r = req(vec![customer(1, 1.0, 0.0, 0, 100)], 1000);
+        let body = serde_json::to_string(&r).unwrap();
+        let ctx = MockContext::empty()
+            .with_seed(&format!("{REQUEST_PREFIX}v1"), &body)
+            .with_strategy("vrptw-plan-greedy:v1", "{}");
+        let s = NearestNeighborSuggestor;
+        assert!(!s.accepts(&ctx));
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn suggestor_skips_malformed_seed() {
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}bad"), "not json");
+        let s = NearestNeighborSuggestor;
+        let eff = s.execute(&ctx).await;
+        assert_eq!(eff.proposals().len(), 0);
     }
 }

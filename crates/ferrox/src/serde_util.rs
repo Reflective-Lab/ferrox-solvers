@@ -32,3 +32,42 @@ pub mod f64_inf {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize)]
+    struct Bound {
+        #[serde(with = "super::f64_inf")]
+        v: f64,
+    }
+
+    #[test]
+    fn finite_value_round_trips() {
+        let b = Bound { v: 3.5 };
+        let s = serde_json::to_string(&b).unwrap();
+        let r: Bound = serde_json::from_str(&s).unwrap();
+        assert!((r.v - 3.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn positive_infinity_round_trips() {
+        let b = Bound { v: f64::INFINITY };
+        let s = serde_json::to_string(&b).unwrap();
+        // The serialized form must be plain JSON (no infinity literal).
+        assert!(!s.contains("inf") && !s.contains("Infinity"));
+        let r: Bound = serde_json::from_str(&s).unwrap();
+        assert!(r.v.is_infinite() && r.v.is_sign_positive());
+    }
+
+    #[test]
+    fn negative_infinity_round_trips() {
+        let b = Bound {
+            v: f64::NEG_INFINITY,
+        };
+        let s = serde_json::to_string(&b).unwrap();
+        let r: Bound = serde_json::from_str(&s).unwrap();
+        assert!(r.v.is_infinite() && r.v.is_sign_negative());
+    }
+}
