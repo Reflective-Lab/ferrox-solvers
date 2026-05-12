@@ -155,12 +155,12 @@ status:
 clean:
     cargo clean
 
-# ── Release-grade gates (appended from ~/dev/templates/converge-extension) ─
+# ── Release-grade gates (appended from ~/dev/reflective-templates/converge-extension) ─
 # Standard: https://github.com/Reflective-Lab/converge/blob/main/kb/Standards/Extension%20Release%20Checklist.md
 
 # ── Release-grade gates (Extension Release Checklist) ─────────────────────
 # Mirror of foundation Justfile recipes. Update from
-# ~/dev/templates/converge-extension/Justfile in lockstep with foundation.
+# ~/dev/reflective-templates/converge-extension/Justfile in lockstep with foundation.
 
 # Gate 1: supply-chain audit. Output:
 #   target/security/audit.json   (cargo-audit JSON)

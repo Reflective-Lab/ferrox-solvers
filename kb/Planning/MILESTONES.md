@@ -3,7 +3,7 @@ source: mixed
 ---
 # Milestones
 
-> See `~/dev/work/EPIC.md` for the coarse-grained outcomes these milestones advance.
+> See `~/dev/reflective/stack/bedrock-platform/EPIC.md` for the coarse-grained outcomes these milestones advance.
 
 ## Current: v0.4.1 — Converge 3.8.1 Solver Baseline
 
