@@ -1,9 +1,11 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, ProposedFact, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use ferrox_highs_sys::HighsModelStatus;
 use ferrox_highs_sys::safe::HighsSolver;
 use std::collections::HashMap;
 use tracing::warn;
+
+use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
 
 use super::problem::{MipPlan, MipRequest, VarKind};
 
@@ -33,6 +35,13 @@ impl Suggestor for HighsMipSuggestor {
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
+        let _span = suggestor_span(
+            self.name(),
+            ContextKey::Seeds,
+            ContextKey::Strategies,
+            ctx.count(ContextKey::Seeds),
+        )
+        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
@@ -54,13 +63,13 @@ impl Suggestor for HighsMipSuggestor {
                         _ => 0.0,
                     };
                     proposals.push(
-                        ProposedFact::new(
-                            ContextKey::Strategies,
-                            format!("{PLAN_PREFIX}{}", plan.request_id),
-                            serde_json::to_string(&plan).unwrap_or_default(),
-                            self.name(),
-                        )
-                        .with_confidence(confidence),
+                        FERROX_PROVENANCE
+                            .proposed_fact(
+                                ContextKey::Strategies,
+                                format!("{PLAN_PREFIX}{}", plan.request_id),
+                                serde_json::to_string(&plan).unwrap_or_default(),
+                            )
+                            .with_confidence(confidence),
                     );
                 }
                 Err(e) => {

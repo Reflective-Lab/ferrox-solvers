@@ -23,6 +23,26 @@ impl OrtoolsStatus {
     }
 }
 
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinCostFlowStatus {
+    NotSolved = 0,
+    Optimal = 1,
+    Feasible = 2,
+    Infeasible = 3,
+    Unbalanced = 4,
+    BadResult = 5,
+    BadCostRange = 6,
+    BadCapacityRange = 7,
+    Error = 8,
+}
+
+impl MinCostFlowStatus {
+    pub fn is_success(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+}
+
 // ── Opaque C types ────────────────────────────────────────────────────────────
 
 #[repr(C)]
@@ -42,6 +62,11 @@ pub enum LpSolverType {
 
 #[repr(C)]
 pub struct MpSolver {
+    _p: [u8; 0],
+}
+
+#[repr(C)]
+pub struct MinCostFlow {
     _p: [u8; 0],
 }
 
@@ -80,6 +105,19 @@ unsafe extern "C" {
         rhs: i64,
     );
     pub fn cpmodel_add_all_different(m: *mut CpModelBuilder, idx: *const i32, n: usize);
+    pub fn cpmodel_add_bool_or(m: *mut CpModelBuilder, lits: *const i32, n: usize);
+    pub fn cpmodel_add_bool_and(m: *mut CpModelBuilder, lits: *const i32, n: usize);
+    pub fn cpmodel_add_bool_xor(m: *mut CpModelBuilder, lits: *const i32, n: usize);
+    pub fn cpmodel_add_implication(m: *mut CpModelBuilder, lhs: i32, rhs: i32);
+    pub fn cpmodel_add_at_most_one(m: *mut CpModelBuilder, lits: *const i32, n: usize);
+    pub fn cpmodel_add_exactly_one(m: *mut CpModelBuilder, lits: *const i32, n: usize);
+    pub fn cpmodel_add_allowed_assignments(
+        m: *mut CpModelBuilder,
+        idx: *const i32,
+        var_count: usize,
+        tuples: *const i64,
+        tuple_count: usize,
+    );
     pub fn cpmodel_minimize(m: *mut CpModelBuilder, idx: *const i32, c: *const i64, n: usize);
     pub fn cpmodel_maximize(m: *mut CpModelBuilder, idx: *const i32, c: *const i64, n: usize);
     pub fn cpmodel_solve(m: *mut CpModelBuilder, time_limit: c_double) -> *mut CpSolverResponse;
@@ -112,6 +150,19 @@ unsafe extern "C" {
         n: usize,
     );
     pub fn cpmodel_add_no_overlap(m: *mut CpModelBuilder, idx: *const c_int, n: usize);
+    pub fn cpmodel_add_cumulative(
+        m: *mut CpModelBuilder,
+        intervals: *const c_int,
+        demands: *const i64,
+        n: usize,
+        capacity: i64,
+    );
+    pub fn cpmodel_add_no_overlap_2d(
+        m: *mut CpModelBuilder,
+        x_intervals: *const c_int,
+        y_intervals: *const c_int,
+        n: usize,
+    );
 
     pub fn mpsolver_new(name: *const c_char, t: LpSolverType) -> *mut MpSolver;
     pub fn mpsolver_free(s: *mut MpSolver);
@@ -141,6 +192,27 @@ unsafe extern "C" {
     pub fn mpsolver_solve(s: *mut MpSolver) -> OrtoolsStatus;
     pub fn mpsolver_objective_value(s: *const MpSolver) -> c_double;
     pub fn mpsolver_var_value(s: *const MpSolver, vi: c_int) -> c_double;
+
+    pub fn mincostflow_new(reserve_num_nodes: c_int, reserve_num_arcs: c_int) -> *mut MinCostFlow;
+    pub fn mincostflow_free(f: *mut MinCostFlow);
+    pub fn mincostflow_add_arc(
+        f: *mut MinCostFlow,
+        tail: c_int,
+        head: c_int,
+        capacity: i64,
+        unit_cost: i64,
+    ) -> c_int;
+    pub fn mincostflow_set_node_supply(f: *mut MinCostFlow, node: c_int, supply: i64);
+    pub fn mincostflow_solve(f: *mut MinCostFlow) -> MinCostFlowStatus;
+    pub fn mincostflow_solve_max_flow_with_min_cost(f: *mut MinCostFlow) -> MinCostFlowStatus;
+    pub fn mincostflow_optimal_cost(f: *const MinCostFlow) -> i64;
+    pub fn mincostflow_maximum_flow(f: *const MinCostFlow) -> i64;
+    pub fn mincostflow_flow(f: *const MinCostFlow, arc: c_int) -> i64;
+    pub fn mincostflow_num_arcs(f: *const MinCostFlow) -> c_int;
+    pub fn mincostflow_tail(f: *const MinCostFlow, arc: c_int) -> c_int;
+    pub fn mincostflow_head(f: *const MinCostFlow, arc: c_int) -> c_int;
+    pub fn mincostflow_capacity(f: *const MinCostFlow, arc: c_int) -> i64;
+    pub fn mincostflow_unit_cost(f: *const MinCostFlow, arc: c_int) -> i64;
 }
 
 // ── Safe wrappers ─────────────────────────────────────────────────────────────
@@ -216,6 +288,56 @@ pub mod safe {
         pub fn add_all_different(&mut self, vars: &[i32]) {
             unsafe {
                 cpmodel_add_all_different(self.ptr.as_ptr(), vars.as_ptr(), vars.len());
+            }
+        }
+
+        pub fn add_bool_or(&mut self, lits: &[i32]) {
+            unsafe {
+                cpmodel_add_bool_or(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
+            }
+        }
+
+        pub fn add_bool_and(&mut self, lits: &[i32]) {
+            unsafe {
+                cpmodel_add_bool_and(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
+            }
+        }
+
+        pub fn add_bool_xor(&mut self, lits: &[i32]) {
+            unsafe {
+                cpmodel_add_bool_xor(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
+            }
+        }
+
+        pub fn add_implication(&mut self, lhs: i32, rhs: i32) {
+            unsafe {
+                cpmodel_add_implication(self.ptr.as_ptr(), lhs, rhs);
+            }
+        }
+
+        pub fn add_at_most_one(&mut self, lits: &[i32]) {
+            unsafe {
+                cpmodel_add_at_most_one(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
+            }
+        }
+
+        pub fn add_exactly_one(&mut self, lits: &[i32]) {
+            unsafe {
+                cpmodel_add_exactly_one(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
+            }
+        }
+
+        pub fn add_allowed_assignments(&mut self, vars: &[i32], tuples: &[Vec<i64>]) {
+            assert!(tuples.iter().all(|tuple| tuple.len() == vars.len()));
+            let flat: Vec<i64> = tuples.iter().flatten().copied().collect();
+            unsafe {
+                cpmodel_add_allowed_assignments(
+                    self.ptr.as_ptr(),
+                    vars.as_ptr(),
+                    vars.len(),
+                    flat.as_ptr(),
+                    tuples.len(),
+                );
             }
         }
 
@@ -298,6 +420,31 @@ pub mod safe {
         pub fn add_no_overlap(&mut self, intervals: &[i32]) {
             unsafe {
                 cpmodel_add_no_overlap(self.ptr.as_ptr(), intervals.as_ptr(), intervals.len());
+            }
+        }
+
+        pub fn add_cumulative(&mut self, intervals: &[i32], demands: &[i64], capacity: i64) {
+            assert_eq!(intervals.len(), demands.len());
+            unsafe {
+                cpmodel_add_cumulative(
+                    self.ptr.as_ptr(),
+                    intervals.as_ptr(),
+                    demands.as_ptr(),
+                    intervals.len(),
+                    capacity,
+                );
+            }
+        }
+
+        pub fn add_no_overlap_2d(&mut self, x_intervals: &[i32], y_intervals: &[i32]) {
+            assert_eq!(x_intervals.len(), y_intervals.len());
+            unsafe {
+                cpmodel_add_no_overlap_2d(
+                    self.ptr.as_ptr(),
+                    x_intervals.as_ptr(),
+                    y_intervals.as_ptr(),
+                    x_intervals.len(),
+                );
             }
         }
 
@@ -406,6 +553,81 @@ pub mod safe {
             unsafe { mpsolver_free(self.ptr.as_ptr()) }
         }
     }
+
+    pub struct SimpleMinCostFlow {
+        ptr: NonNull<MinCostFlow>,
+    }
+
+    impl SimpleMinCostFlow {
+        pub fn new(reserve_num_nodes: i32, reserve_num_arcs: i32) -> Self {
+            unsafe {
+                Self {
+                    ptr: NonNull::new(mincostflow_new(reserve_num_nodes, reserve_num_arcs))
+                        .expect("mincostflow_new returned null"),
+                }
+            }
+        }
+
+        pub fn add_arc_with_capacity_and_unit_cost(
+            &mut self,
+            tail: i32,
+            head: i32,
+            capacity: i64,
+            unit_cost: i64,
+        ) -> i32 {
+            unsafe { mincostflow_add_arc(self.ptr.as_ptr(), tail, head, capacity, unit_cost) }
+        }
+
+        pub fn set_node_supply(&mut self, node: i32, supply: i64) {
+            unsafe { mincostflow_set_node_supply(self.ptr.as_ptr(), node, supply) }
+        }
+
+        pub fn solve(&mut self) -> MinCostFlowStatus {
+            unsafe { mincostflow_solve(self.ptr.as_ptr()) }
+        }
+
+        pub fn solve_max_flow_with_min_cost(&mut self) -> MinCostFlowStatus {
+            unsafe { mincostflow_solve_max_flow_with_min_cost(self.ptr.as_ptr()) }
+        }
+
+        pub fn optimal_cost(&self) -> i64 {
+            unsafe { mincostflow_optimal_cost(self.ptr.as_ptr()) }
+        }
+
+        pub fn maximum_flow(&self) -> i64 {
+            unsafe { mincostflow_maximum_flow(self.ptr.as_ptr()) }
+        }
+
+        pub fn flow(&self, arc: i32) -> i64 {
+            unsafe { mincostflow_flow(self.ptr.as_ptr(), arc) }
+        }
+
+        pub fn num_arcs(&self) -> i32 {
+            unsafe { mincostflow_num_arcs(self.ptr.as_ptr()) }
+        }
+
+        pub fn tail(&self, arc: i32) -> i32 {
+            unsafe { mincostflow_tail(self.ptr.as_ptr(), arc) }
+        }
+
+        pub fn head(&self, arc: i32) -> i32 {
+            unsafe { mincostflow_head(self.ptr.as_ptr(), arc) }
+        }
+
+        pub fn capacity(&self, arc: i32) -> i64 {
+            unsafe { mincostflow_capacity(self.ptr.as_ptr(), arc) }
+        }
+
+        pub fn unit_cost(&self, arc: i32) -> i64 {
+            unsafe { mincostflow_unit_cost(self.ptr.as_ptr(), arc) }
+        }
+    }
+
+    impl Drop for SimpleMinCostFlow {
+        fn drop(&mut self) {
+            unsafe { mincostflow_free(self.ptr.as_ptr()) }
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -419,10 +641,15 @@ mod tests {
         assert_eq!(OrtoolsStatus::Optimal as i32, 1);
         assert!(OrtoolsStatus::Optimal.is_success());
         assert!(!OrtoolsStatus::Infeasible.is_success());
+        assert_eq!(MinCostFlowStatus::Optimal as i32, 1);
+        assert!(MinCostFlowStatus::Optimal.is_success());
+        assert!(!MinCostFlowStatus::Unbalanced.is_success());
     }
 
     #[cfg(feature = "link")]
     mod integration {
+        use crate::MinCostFlowStatus;
+
         use super::super::safe::*;
 
         #[test]
@@ -464,6 +691,25 @@ mod tests {
             s.maximize();
             assert!(s.solve().is_success());
             assert!((s.objective_value() - 10.0).abs() < 1e-6);
+        }
+
+        #[test]
+        fn min_cost_flow_balanced() {
+            let mut flow = SimpleMinCostFlow::new(4, 4);
+            let a0 = flow.add_arc_with_capacity_and_unit_cost(0, 1, 3, 1);
+            let a1 = flow.add_arc_with_capacity_and_unit_cost(0, 2, 5, 2);
+            let a2 = flow.add_arc_with_capacity_and_unit_cost(1, 3, 3, 1);
+            let a3 = flow.add_arc_with_capacity_and_unit_cost(2, 3, 5, 1);
+            flow.set_node_supply(0, 5);
+            flow.set_node_supply(3, -5);
+
+            assert_eq!(flow.solve(), MinCostFlowStatus::Optimal);
+            assert_eq!(flow.optimal_cost(), 12);
+            assert_eq!(flow.maximum_flow(), 5);
+            assert_eq!(flow.flow(a0), 3);
+            assert_eq!(flow.flow(a1), 2);
+            assert_eq!(flow.flow(a2), 3);
+            assert_eq!(flow.flow(a3), 2);
         }
     }
 }

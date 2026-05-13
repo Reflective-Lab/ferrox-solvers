@@ -1,11 +1,13 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, ProposedFact, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::CpModel;
 use std::collections::HashMap;
 use tracing::warn;
 
-use super::problem::{ConstraintKind, CpSatPlan, CpSatRequest};
+use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+
+use super::problem::{ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpTerm};
 
 const REQUEST_PREFIX: &str = "cpsat-request:";
 const PLAN_PREFIX: &str = "cpsat-plan:";
@@ -23,7 +25,7 @@ impl Suggestor for CpSatSuggestor {
     }
 
     fn complexity_hint(&self) -> Option<&'static str> {
-        Some("NP-hard in general; CP-SAT DPLL+propagation+LNS; practical for n≤500 vars")
+        Some("NP-hard in general; CP-SAT DPLL+propagation+LNS; practical for n<=500 vars")
     }
 
     fn accepts(&self, ctx: &dyn Context) -> bool {
@@ -33,6 +35,13 @@ impl Suggestor for CpSatSuggestor {
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
+        let _span = suggestor_span(
+            self.name(),
+            ContextKey::Seeds,
+            ContextKey::Strategies,
+            ctx.count(ContextKey::Seeds),
+        )
+        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
@@ -54,13 +63,13 @@ impl Suggestor for CpSatSuggestor {
                         _ => 0.0,
                     };
                     proposals.push(
-                        ProposedFact::new(
-                            ContextKey::Strategies,
-                            format!("{PLAN_PREFIX}{}", plan.request_id),
-                            serde_json::to_string(&plan).unwrap_or_default(),
-                            self.name(),
-                        )
-                        .with_confidence(confidence),
+                        FERROX_PROVENANCE
+                            .proposed_fact(
+                                ContextKey::Strategies,
+                                format!("{PLAN_PREFIX}{}", plan.request_id),
+                                serde_json::to_string(&plan).unwrap_or_default(),
+                            )
+                            .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
@@ -155,12 +164,101 @@ pub fn solve_cp(req: &CpSatRequest) -> CpSatPlan {
                     .collect();
                 model.add_all_different(&idxs);
             }
+            ConstraintKind::BoolOr { literals } => {
+                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "BoolOr") {
+                    model.add_bool_or(&lits);
+                }
+            }
+            ConstraintKind::BoolAnd { literals } => {
+                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "BoolAnd") {
+                    model.add_bool_and(&lits);
+                }
+            }
+            ConstraintKind::BoolXor { literals } => {
+                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "BoolXor") {
+                    model.add_bool_xor(&lits);
+                }
+            }
+            ConstraintKind::Implication {
+                antecedent,
+                consequent,
+            } => {
+                if let (Some(lhs), Some(rhs)) = (
+                    bool_literal_to_ref(antecedent, &bool_name_to_idx, "Implication"),
+                    bool_literal_to_ref(consequent, &bool_name_to_idx, "Implication"),
+                ) {
+                    model.add_implication(lhs, rhs);
+                } else {
+                    warn!("Implication references unknown bool variable");
+                }
+            }
+            ConstraintKind::AtMostOne { literals } => {
+                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "AtMostOne")
+                {
+                    model.add_at_most_one(&lits);
+                }
+            }
+            ConstraintKind::ExactlyOne { literals } => {
+                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "ExactlyOne")
+                {
+                    model.add_exactly_one(&lits);
+                }
+            }
+            ConstraintKind::AllowedAssignments { vars, tuples } => {
+                if tuples.iter().all(|tuple| tuple.len() == vars.len()) {
+                    if let Some(idxs) = vars_to_idxs(vars, &name_to_idx, "AllowedAssignments") {
+                        model.add_allowed_assignments(&idxs, tuples);
+                    }
+                } else {
+                    warn!("AllowedAssignments tuple arity does not match vars");
+                }
+            }
             ConstraintKind::NoOverlap { intervals } => {
                 let idxs: Vec<i32> = intervals
                     .iter()
                     .filter_map(|n| interval_name_to_idx.get(n).copied())
                     .collect();
                 model.add_no_overlap(&idxs);
+            }
+            ConstraintKind::Cumulative { demands, capacity } => {
+                let mut interval_idxs = Vec::with_capacity(demands.len());
+                let mut demand_values = Vec::with_capacity(demands.len());
+                let mut missing = false;
+                for demand in demands {
+                    if let Some(&idx) = interval_name_to_idx.get(&demand.interval) {
+                        interval_idxs.push(idx);
+                        demand_values.push(demand.demand);
+                    } else {
+                        missing = true;
+                        warn!(
+                            interval = %demand.interval,
+                            "Cumulative references unknown interval"
+                        );
+                    }
+                }
+                if !missing {
+                    model.add_cumulative(&interval_idxs, &demand_values, *capacity);
+                }
+            }
+            ConstraintKind::NoOverlap2D { rectangles } => {
+                let mut x_intervals = Vec::with_capacity(rectangles.len());
+                let mut y_intervals = Vec::with_capacity(rectangles.len());
+                let mut missing = false;
+                for rectangle in rectangles {
+                    if let (Some(&x), Some(&y)) = (
+                        interval_name_to_idx.get(&rectangle.x_interval),
+                        interval_name_to_idx.get(&rectangle.y_interval),
+                    ) {
+                        x_intervals.push(x);
+                        y_intervals.push(y);
+                    } else {
+                        missing = true;
+                        warn!("NoOverlap2D references unknown interval");
+                    }
+                }
+                if !missing {
+                    model.add_no_overlap_2d(&x_intervals, &y_intervals);
+                }
             }
         }
     }
@@ -214,14 +312,56 @@ pub fn solve_cp(req: &CpSatRequest) -> CpSatPlan {
     }
 }
 
-fn terms_to_vecs(
-    terms: &[crate::cp::problem::CpTerm],
-    name_to_idx: &HashMap<String, i32>,
-) -> (Vec<i32>, Vec<i64>) {
+fn terms_to_vecs(terms: &[CpTerm], name_to_idx: &HashMap<String, i32>) -> (Vec<i32>, Vec<i64>) {
     terms
         .iter()
         .filter_map(|t| name_to_idx.get(&t.var).map(|&idx| (idx, t.coeff)))
         .unzip()
+}
+
+fn vars_to_idxs(
+    vars: &[String],
+    name_to_idx: &HashMap<String, i32>,
+    constraint: &'static str,
+) -> Option<Vec<i32>> {
+    let mut idxs = Vec::with_capacity(vars.len());
+    for var in vars {
+        let Some(&idx) = name_to_idx.get(var) else {
+            warn!(constraint, var = %var, "constraint references unknown variable");
+            return None;
+        };
+        idxs.push(idx);
+    }
+    Some(idxs)
+}
+
+fn bool_literals_to_refs(
+    literals: &[CpBoolLiteral],
+    bool_name_to_idx: &HashMap<String, i32>,
+    constraint: &'static str,
+) -> Option<Vec<i32>> {
+    let mut refs = Vec::with_capacity(literals.len());
+    for literal in literals {
+        let lit_ref = bool_literal_to_ref(literal, bool_name_to_idx, constraint)?;
+        refs.push(lit_ref);
+    }
+    Some(refs)
+}
+
+fn bool_literal_to_ref(
+    literal: &CpBoolLiteral,
+    bool_name_to_idx: &HashMap<String, i32>,
+    constraint: &'static str,
+) -> Option<i32> {
+    let Some(&idx) = bool_name_to_idx.get(&literal.var) else {
+        warn!(
+            constraint,
+            var = %literal.var,
+            "constraint references unknown bool variable"
+        );
+        return None;
+    };
+    Some(if literal.negated { -idx - 1 } else { idx })
 }
 
 #[cfg(test)]
@@ -233,8 +373,12 @@ fn terms_to_vecs(
 )]
 mod tests {
     use super::*;
-    use crate::cp::problem::{CpTerm, CpVariable, IntervalVarDef, OptionalIntervalVarDef};
+    use crate::cp::problem::{
+        CpBoolLiteral, CpTerm, CpVariable, CumulativeDemand, IntervalVarDef, NoOverlap2DRectangle,
+        OptionalIntervalVarDef,
+    };
     use crate::test_support::MockContext;
+    use proptest::prelude::*;
 
     fn var(name: &str, lb: i64, ub: i64) -> CpVariable {
         CpVariable {
@@ -258,6 +402,26 @@ mod tests {
         CpTerm {
             var: var.into(),
             coeff,
+        }
+    }
+
+    fn lit(var: &str) -> CpBoolLiteral {
+        CpBoolLiteral {
+            var: var.into(),
+            negated: false,
+        }
+    }
+
+    fn not_lit(var: &str) -> CpBoolLiteral {
+        CpBoolLiteral {
+            var: var.into(),
+            negated: true,
+        }
+    }
+
+    fn fixed_bool(var: &str, value: bool) -> ConstraintKind {
+        ConstraintKind::BoolAnd {
+            literals: vec![if value { lit(var) } else { not_lit(var) }],
         }
     }
 
@@ -305,7 +469,7 @@ mod tests {
         };
         let plan = solve_cp(&req);
         assert_eq!(plan.status, "optimal");
-        // optimal: maximize 3x+2y s.t. x+y<=8, x,y∈[0,10] → x=8, y=0, obj=24
+        // optimal: maximize 3x+2y s.t. x+y<=8, x,y in [0,10] -> x=8, y=0, obj=24
         assert_eq!(plan.objective_value, Some(24));
     }
 
@@ -357,6 +521,151 @@ mod tests {
     }
 
     #[test]
+    fn boolean_logic_primitives() {
+        let req = CpSatRequest {
+            id: "bool".into(),
+            variables: vec![
+                bool_var("a"),
+                bool_var("b"),
+                bool_var("c"),
+                bool_var("d"),
+                bool_var("e"),
+            ],
+            interval_vars: vec![],
+            optional_interval_vars: vec![],
+            constraints: vec![
+                ConstraintKind::ExactlyOne {
+                    literals: vec![lit("a"), lit("b")],
+                },
+                ConstraintKind::Implication {
+                    antecedent: lit("a"),
+                    consequent: lit("c"),
+                },
+                ConstraintKind::BoolAnd {
+                    literals: vec![lit("c")],
+                },
+                ConstraintKind::BoolXor {
+                    literals: vec![lit("a"), lit("b"), lit("d")],
+                },
+                ConstraintKind::BoolOr {
+                    literals: vec![not_lit("d"), lit("e")],
+                },
+                ConstraintKind::AtMostOne {
+                    literals: vec![lit("a"), lit("e")],
+                },
+            ],
+            objective_terms: Some(vec![term("a", 1)]),
+            minimize: false,
+            time_limit_seconds: Some(2.0),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "optimal");
+        let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
+        assert_eq!(map["a"], 1);
+        assert_eq!(map["b"], 0);
+        assert_eq!(map["c"], 1);
+        assert_eq!(map["d"], 0);
+        assert_eq!(map["e"], 0);
+    }
+
+    #[test]
+    fn conflicting_boolean_constraints_are_infeasible() {
+        let req = CpSatRequest {
+            id: "bool-negative".into(),
+            variables: vec![bool_var("a"), bool_var("b")],
+            interval_vars: vec![],
+            optional_interval_vars: vec![],
+            constraints: vec![
+                ConstraintKind::ExactlyOne {
+                    literals: vec![lit("a"), lit("b")],
+                },
+                ConstraintKind::BoolAnd {
+                    literals: vec![not_lit("a"), not_lit("b")],
+                },
+            ],
+            objective_terms: None,
+            minimize: false,
+            time_limit_seconds: Some(2.0),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "infeasible");
+        assert!(plan.assignments.is_empty());
+    }
+
+    proptest! {
+        #[test]
+        fn implication_matches_truth_table(a_value in any::<bool>(), b_value in any::<bool>()) {
+            let req = CpSatRequest {
+                id: format!("implication-{a_value}-{b_value}"),
+                variables: vec![bool_var("a"), bool_var("b")],
+                interval_vars: vec![],
+                optional_interval_vars: vec![],
+                constraints: vec![
+                    ConstraintKind::Implication {
+                        antecedent: lit("a"),
+                        consequent: lit("b"),
+                    },
+                    fixed_bool("a", a_value),
+                    fixed_bool("b", b_value),
+                ],
+                objective_terms: None,
+                minimize: false,
+                time_limit_seconds: Some(2.0),
+            };
+            let plan = solve_cp(&req);
+            let feasible = matches!(plan.status.as_str(), "optimal" | "feasible");
+            let should_be_feasible = !a_value || b_value;
+            assert_eq!(feasible, should_be_feasible, "a={a_value}, b={b_value}");
+        }
+    }
+
+    #[test]
+    fn allowed_assignments_table() {
+        let req = CpSatRequest {
+            id: "table".into(),
+            variables: vec![var("x", 0, 2), var("y", 0, 2)],
+            interval_vars: vec![],
+            optional_interval_vars: vec![],
+            constraints: vec![ConstraintKind::AllowedAssignments {
+                vars: vec!["x".into(), "y".into()],
+                tuples: vec![vec![0, 2], vec![2, 0]],
+            }],
+            objective_terms: Some(vec![term("x", 1)]),
+            minimize: true,
+            time_limit_seconds: Some(2.0),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "optimal");
+        let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
+        assert_eq!((map["x"], map["y"]), (0, 2));
+    }
+
+    #[test]
+    fn allowed_assignments_rejects_unlisted_tuple() {
+        let req = CpSatRequest {
+            id: "table-negative".into(),
+            variables: vec![var("x", 0, 2), var("y", 0, 2)],
+            interval_vars: vec![],
+            optional_interval_vars: vec![],
+            constraints: vec![
+                ConstraintKind::AllowedAssignments {
+                    vars: vec!["x".into(), "y".into()],
+                    tuples: vec![vec![0, 0]],
+                },
+                ConstraintKind::LinearEq {
+                    terms: vec![term("x", 1)],
+                    rhs: 1,
+                },
+            ],
+            objective_terms: None,
+            minimize: false,
+            time_limit_seconds: Some(2.0),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "infeasible");
+    }
+
+    #[test]
     fn fixed_interval_no_overlap() {
         // Two fixed intervals on one machine; NoOverlap forces serial scheduling.
         let req = CpSatRequest {
@@ -402,6 +711,120 @@ mod tests {
     }
 
     #[test]
+    fn cumulative_resource_limits_overlap() {
+        let req = CpSatRequest {
+            id: "cumulative".into(),
+            variables: vec![
+                var("s1", 0, 100),
+                var("e1", 0, 100),
+                var("s2", 0, 100),
+                var("e2", 0, 100),
+            ],
+            interval_vars: vec![
+                IntervalVarDef {
+                    name: "iv1".into(),
+                    start_var: "s1".into(),
+                    duration: 5,
+                    end_var: "e1".into(),
+                },
+                IntervalVarDef {
+                    name: "iv2".into(),
+                    start_var: "s2".into(),
+                    duration: 5,
+                    end_var: "e2".into(),
+                },
+            ],
+            optional_interval_vars: vec![],
+            constraints: vec![ConstraintKind::Cumulative {
+                demands: vec![
+                    CumulativeDemand {
+                        interval: "iv1".into(),
+                        demand: 2,
+                    },
+                    CumulativeDemand {
+                        interval: "iv2".into(),
+                        demand: 2,
+                    },
+                ],
+                capacity: 3,
+            }],
+            objective_terms: Some(vec![term("e2", 1)]),
+            minimize: true,
+            time_limit_seconds: Some(2.0),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "optimal");
+        let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
+        let (s1, e1, s2, e2) = (map["s1"], map["e1"], map["s2"], map["e2"]);
+        assert_eq!(e1 - s1, 5);
+        assert_eq!(e2 - s2, 5);
+        assert!(e1 <= s2 || e2 <= s1, "capacity forces serial tasks");
+    }
+
+    #[test]
+    fn no_overlap_2d_prevents_rectangle_overlap() {
+        let req = CpSatRequest {
+            id: "no-overlap-2d".into(),
+            variables: vec![
+                var("x1s", 0, 10),
+                var("x1e", 0, 10),
+                var("y1s", 0, 0),
+                var("y1e", 2, 2),
+                var("x2s", 0, 10),
+                var("x2e", 0, 10),
+                var("y2s", 0, 0),
+                var("y2e", 2, 2),
+            ],
+            interval_vars: vec![
+                IntervalVarDef {
+                    name: "x1".into(),
+                    start_var: "x1s".into(),
+                    duration: 4,
+                    end_var: "x1e".into(),
+                },
+                IntervalVarDef {
+                    name: "y1".into(),
+                    start_var: "y1s".into(),
+                    duration: 2,
+                    end_var: "y1e".into(),
+                },
+                IntervalVarDef {
+                    name: "x2".into(),
+                    start_var: "x2s".into(),
+                    duration: 4,
+                    end_var: "x2e".into(),
+                },
+                IntervalVarDef {
+                    name: "y2".into(),
+                    start_var: "y2s".into(),
+                    duration: 2,
+                    end_var: "y2e".into(),
+                },
+            ],
+            optional_interval_vars: vec![],
+            constraints: vec![ConstraintKind::NoOverlap2D {
+                rectangles: vec![
+                    NoOverlap2DRectangle {
+                        x_interval: "x1".into(),
+                        y_interval: "y1".into(),
+                    },
+                    NoOverlap2DRectangle {
+                        x_interval: "x2".into(),
+                        y_interval: "y2".into(),
+                    },
+                ],
+            }],
+            objective_terms: Some(vec![term("x2e", 1)]),
+            minimize: true,
+            time_limit_seconds: Some(2.0),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "optimal");
+        let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
+        assert!(map["x1e"] <= map["x2s"] || map["x2e"] <= map["x1s"]);
+    }
+
+    #[test]
     fn optional_interval_uses_lit() {
         // Bool literal toggles whether the interval is active.
         let req = CpSatRequest {
@@ -426,7 +849,7 @@ mod tests {
 
     #[test]
     fn ignores_unknown_var_references() {
-        // interval_var references unknown start/end → warning, no panic.
+        // interval_var references unknown start/end: warning, no panic.
         let req = CpSatRequest {
             id: "u".into(),
             variables: vec![var("s", 0, 10)],
@@ -527,7 +950,7 @@ mod tests {
     }
 
     /// Stress: 30-second budget on a hard 2D bin-packing-style assignment.
-    /// 500 boolean items × 8 capacity rows with correlated coefficients —
+    /// 500 boolean items x 8 capacity rows with correlated coefficients:
     /// CP-SAT cannot prune via LP relaxation, so it explores the full tree.
     /// Designed to actually consume the 30 s budget.
     #[test]
@@ -539,7 +962,7 @@ mod tests {
             *s = s.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             *s
         };
-        // Strongly-correlated knapsack: value = weight + small constant — defeats
+        // Strongly-correlated knapsack: value = weight + small constant. This defeats
         // greedy/LP-relax bounds and forces deep CP-SAT search.
         let weights: Vec<i64> = (0..n)
             .map(|_| ((step(&mut state) >> 33) & 0xFF) as i64 + 50)

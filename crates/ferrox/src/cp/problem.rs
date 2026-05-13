@@ -38,6 +38,30 @@ pub struct CpTerm {
     pub coeff: i64,
 }
 
+/// A Boolean literal in a CP-SAT model.
+///
+/// `negated = true` represents `not var`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpBoolLiteral {
+    pub var: String,
+    #[serde(default)]
+    pub negated: bool,
+}
+
+/// One fixed-demand task in a cumulative resource constraint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CumulativeDemand {
+    pub interval: String,
+    pub demand: i64,
+}
+
+/// One rectangle in a two-dimensional no-overlap constraint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoOverlap2DRectangle {
+    pub x_interval: String,
+    pub y_interval: String,
+}
+
 /// A constraint over variables.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -57,9 +81,48 @@ pub enum ConstraintKind {
     AllDifferent {
         vars: Vec<String>,
     },
+    /// At least one literal must be true.
+    BoolOr {
+        literals: Vec<CpBoolLiteral>,
+    },
+    /// Every literal must be true.
+    BoolAnd {
+        literals: Vec<CpBoolLiteral>,
+    },
+    /// An odd number of literals must be true.
+    BoolXor {
+        literals: Vec<CpBoolLiteral>,
+    },
+    /// If `antecedent` is true, `consequent` must be true.
+    Implication {
+        antecedent: CpBoolLiteral,
+        consequent: CpBoolLiteral,
+    },
+    /// At most one literal may be true.
+    AtMostOne {
+        literals: Vec<CpBoolLiteral>,
+    },
+    /// Exactly one literal must be true.
+    ExactlyOne {
+        literals: Vec<CpBoolLiteral>,
+    },
+    /// The listed variables must take one of the allowed tuples.
+    AllowedAssignments {
+        vars: Vec<String>,
+        tuples: Vec<Vec<i64>>,
+    },
     /// None of the listed interval variables may overlap in time.
     NoOverlap {
         intervals: Vec<String>,
+    },
+    /// Intervals consume a fixed amount of a cumulative resource.
+    Cumulative {
+        demands: Vec<CumulativeDemand>,
+        capacity: i64,
+    },
+    /// Rectangles, represented by x/y interval pairs, may not overlap.
+    NoOverlap2D {
+        rectangles: Vec<NoOverlap2DRectangle>,
     },
 }
 

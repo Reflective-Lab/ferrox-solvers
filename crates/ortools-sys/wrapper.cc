@@ -17,6 +17,7 @@
 #include "ortools/sat/cp_model_solver.h"
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/linear_solver/linear_solver.h"
+#include "ortools/graph/min_cost_flow.h"
 
 // ── Internal storage types ────────────────────────────────────────────────────
 
@@ -40,10 +41,21 @@ struct MpSolver {
     std::vector<operations_research::MPConstraint*> constraints;
 };
 
+struct MinCostFlow {
+    operations_research::SimpleMinCostFlow solver;
+
+    MinCostFlow(int32_t reserve_num_nodes, int32_t reserve_num_arcs)
+        : solver(reserve_num_nodes, reserve_num_arcs) {}
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 static operations_research::sat::IntVar make_var(int32_t idx, const CpModelBuilder* m) {
     return m->vars.at(idx);
+}
+
+static int32_t negated_lit_ref(int32_t lit) {
+    return -lit - 1;
 }
 
 static operations_research::sat::LinearExpr make_expr(
@@ -55,6 +67,21 @@ static operations_research::sat::LinearExpr make_expr(
     for (size_t i = 0; i < n; ++i)
         vars.push_back(make_var(idx[i], m));
     return operations_research::sat::LinearExpr::WeightedSum(vars, coeffs);
+}
+
+static int32_t map_min_cost_flow_status(operations_research::MinCostFlowBase::Status status) {
+    using S = operations_research::MinCostFlowBase;
+    switch (status) {
+        case S::NOT_SOLVED:          return 0;
+        case S::OPTIMAL:             return 1;
+        case S::FEASIBLE:            return 2;
+        case S::INFEASIBLE:          return 3;
+        case S::UNBALANCED:          return 4;
+        case S::BAD_RESULT:          return 5;
+        case S::BAD_COST_RANGE:      return 6;
+        case S::BAD_CAPACITY_RANGE:  return 7;
+        default:                     return 8;
+    }
 }
 
 // ── CP-SAT extern "C" ─────────────────────────────────────────────────────────
@@ -109,6 +136,64 @@ void cpmodel_add_all_different(CpModelBuilder* m, const int32_t* idx, size_t n) 
     for (size_t i = 0; i < n; ++i)
         vars.push_back(make_var(idx[i], m));
     m->builder.AddAllDifferent(vars);
+}
+
+void cpmodel_add_bool_or(CpModelBuilder* m, const int32_t* lits, size_t n) {
+    auto* proto = m->builder.MutableProto()->add_constraints();
+    auto* bool_or = proto->mutable_bool_or();
+    for (size_t i = 0; i < n; ++i)
+        bool_or->add_literals(lits[i]);
+}
+
+void cpmodel_add_bool_and(CpModelBuilder* m, const int32_t* lits, size_t n) {
+    auto* proto = m->builder.MutableProto()->add_constraints();
+    auto* bool_and = proto->mutable_bool_and();
+    for (size_t i = 0; i < n; ++i)
+        bool_and->add_literals(lits[i]);
+}
+
+void cpmodel_add_bool_xor(CpModelBuilder* m, const int32_t* lits, size_t n) {
+    auto* proto = m->builder.MutableProto()->add_constraints();
+    auto* bool_xor = proto->mutable_bool_xor();
+    for (size_t i = 0; i < n; ++i)
+        bool_xor->add_literals(lits[i]);
+}
+
+void cpmodel_add_implication(CpModelBuilder* m, int32_t lhs, int32_t rhs) {
+    auto* proto = m->builder.MutableProto()->add_constraints();
+    auto* bool_or = proto->mutable_bool_or();
+    bool_or->add_literals(negated_lit_ref(lhs));
+    bool_or->add_literals(rhs);
+}
+
+void cpmodel_add_at_most_one(CpModelBuilder* m, const int32_t* lits, size_t n) {
+    auto* proto = m->builder.MutableProto()->add_constraints();
+    auto* at_most_one = proto->mutable_at_most_one();
+    for (size_t i = 0; i < n; ++i)
+        at_most_one->add_literals(lits[i]);
+}
+
+void cpmodel_add_exactly_one(CpModelBuilder* m, const int32_t* lits, size_t n) {
+    auto* proto = m->builder.MutableProto()->add_constraints();
+    auto* exactly_one = proto->mutable_exactly_one();
+    for (size_t i = 0; i < n; ++i)
+        exactly_one->add_literals(lits[i]);
+}
+
+void cpmodel_add_allowed_assignments(CpModelBuilder* m, const int32_t* idx,
+                                      size_t var_count, const int64_t* tuples,
+                                      size_t tuple_count) {
+    std::vector<operations_research::sat::IntVar> vars;
+    vars.reserve(var_count);
+    for (size_t i = 0; i < var_count; ++i)
+        vars.push_back(make_var(idx[i], m));
+
+    auto table = m->builder.AddAllowedAssignments(vars);
+    for (size_t t = 0; t < tuple_count; ++t) {
+        const int64_t* begin = tuples + t * var_count;
+        std::vector<int64_t> tuple(begin, begin + var_count);
+        table.AddTuple(tuple);
+    }
 }
 
 void cpmodel_minimize(CpModelBuilder* m, const int32_t* idx, const int64_t* c, size_t n) {
@@ -207,6 +292,23 @@ void cpmodel_add_no_overlap(CpModelBuilder* m, const int32_t* idx, size_t n) {
     m->builder.AddNoOverlap(ivs);
 }
 
+// Cumulative: at every integer point, active interval demands must not exceed capacity.
+void cpmodel_add_cumulative(CpModelBuilder* m, const int32_t* intervals,
+                             const int64_t* demands, size_t n, int64_t capacity) {
+    auto cumulative = m->builder.AddCumulative(capacity);
+    for (size_t i = 0; i < n; ++i)
+        cumulative.AddDemand(m->intervals.at(intervals[i]), demands[i]);
+}
+
+// NoOverlap2D: no pair of x/y rectangles may overlap on both axes.
+void cpmodel_add_no_overlap_2d(CpModelBuilder* m, const int32_t* x_intervals,
+                                const int32_t* y_intervals, size_t n) {
+    auto no_overlap_2d = m->builder.AddNoOverlap2D();
+    for (size_t i = 0; i < n; ++i)
+        no_overlap_2d.AddRectangle(m->intervals.at(x_intervals[i]),
+                                   m->intervals.at(y_intervals[i]));
+}
+
 // ── GLOP ──────────────────────────────────────────────────────────────────────
 
 // LP_GLOP = 0, matching LpSolverType in lib.rs
@@ -275,6 +377,65 @@ double mpsolver_objective_value(const MpSolver* s) {
 
 double mpsolver_var_value(const MpSolver* s, int32_t vi) {
     return s->vars[vi]->solution_value();
+}
+
+// ── SimpleMinCostFlow ────────────────────────────────────────────────────────
+
+MinCostFlow* mincostflow_new(int32_t reserve_num_nodes, int32_t reserve_num_arcs) {
+    return new MinCostFlow(reserve_num_nodes, reserve_num_arcs);
+}
+
+void mincostflow_free(MinCostFlow* f) {
+    delete f;
+}
+
+int32_t mincostflow_add_arc(MinCostFlow* f, int32_t tail, int32_t head,
+                             int64_t capacity, int64_t unit_cost) {
+    return f->solver.AddArcWithCapacityAndUnitCost(tail, head, capacity, unit_cost);
+}
+
+void mincostflow_set_node_supply(MinCostFlow* f, int32_t node, int64_t supply) {
+    f->solver.SetNodeSupply(node, supply);
+}
+
+int32_t mincostflow_solve(MinCostFlow* f) {
+    return map_min_cost_flow_status(f->solver.Solve());
+}
+
+int32_t mincostflow_solve_max_flow_with_min_cost(MinCostFlow* f) {
+    return map_min_cost_flow_status(f->solver.SolveMaxFlowWithMinCost());
+}
+
+int64_t mincostflow_optimal_cost(const MinCostFlow* f) {
+    return f->solver.OptimalCost();
+}
+
+int64_t mincostflow_maximum_flow(const MinCostFlow* f) {
+    return f->solver.MaximumFlow();
+}
+
+int64_t mincostflow_flow(const MinCostFlow* f, int32_t arc) {
+    return f->solver.Flow(arc);
+}
+
+int32_t mincostflow_num_arcs(const MinCostFlow* f) {
+    return f->solver.NumArcs();
+}
+
+int32_t mincostflow_tail(const MinCostFlow* f, int32_t arc) {
+    return f->solver.Tail(arc);
+}
+
+int32_t mincostflow_head(const MinCostFlow* f, int32_t arc) {
+    return f->solver.Head(arc);
+}
+
+int64_t mincostflow_capacity(const MinCostFlow* f, int32_t arc) {
+    return f->solver.Capacity(arc);
+}
+
+int64_t mincostflow_unit_cost(const MinCostFlow* f, int32_t arc) {
+    return f->solver.UnitCost(arc);
 }
 
 } // extern "C"

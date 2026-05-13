@@ -5,7 +5,7 @@
 
 use converge_core::{ContextState, Engine};
 use converge_pack::ContextKey;
-use ferrox::cp::{CpSatSuggestor, ConstraintKind, CpSatPlan, CpSatRequest, CpVariable};
+use ferrox::cp::{ConstraintKind, CpSatPlan, CpSatRequest, CpSatSuggestor, CpVariable};
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +16,12 @@ async fn main() {
     let mut variables = Vec::new();
     for r in 0..4 {
         for c in 0..4 {
-            variables.push(CpVariable { name: format!("x_{r}{c}"), lb: 1, ub: 4 });
+            variables.push(CpVariable {
+                name: format!("x_{r}{c}"),
+                lb: 1,
+                ub: 4,
+                is_bool: false,
+            });
         }
     }
 
@@ -40,8 +45,10 @@ async fn main() {
     for br in [0, 2] {
         for bc in [0, 2] {
             let vars = vec![
-                cell(br, bc), cell(br, bc + 1),
-                cell(br + 1, bc), cell(br + 1, bc + 1),
+                cell(br, bc),
+                cell(br, bc + 1),
+                cell(br + 1, bc),
+                cell(br + 1, bc + 1),
             ];
             constraints.push(ConstraintKind::AllDifferent { vars });
         }
@@ -49,13 +56,18 @@ async fn main() {
 
     // Seed: fix x_00 = 1 (i.e., x_00 == 1)
     constraints.push(ConstraintKind::LinearEq {
-        terms: vec![ferrox::cp::CpTerm { var: cell(0, 0), coeff: 1 }],
+        terms: vec![ferrox::cp::CpTerm {
+            var: cell(0, 0),
+            coeff: 1,
+        }],
         rhs: 1,
     });
 
     let request = CpSatRequest {
         id: "sudoku-4x4".to_string(),
         variables,
+        interval_vars: vec![],
+        optional_interval_vars: vec![],
         constraints,
         objective_terms: None,
         minimize: false,
@@ -67,13 +79,16 @@ async fn main() {
         ContextKey::Seeds,
         "cpsat-request:sudoku-4x4",
         &serde_json::to_string(&request).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let result = engine.run(ctx).await.unwrap();
 
-    let plans: Vec<_> = result.context.get(ContextKey::Strategies)
+    let plans: Vec<_> = result
+        .context
+        .get(ContextKey::Strategies)
         .iter()
-        .filter_map(|f| serde_json::from_str::<CpSatPlan>(&f.content).ok())
+        .filter_map(|f| serde_json::from_str::<CpSatPlan>(f.content()).ok())
         .collect();
 
     for plan in &plans {

@@ -48,7 +48,11 @@ fn build_request() -> SchedulingRequest {
 
     let agents: Vec<SchedulingAgent> = (0..NUM_AGENTS)
         .map(|id| {
-            let n = if rng_range(&mut rng, 0, 4) == 0 { 2usize } else { 1 };
+            let n = if rng_range(&mut rng, 0, 4) == 0 {
+                2usize
+            } else {
+                1
+            };
             let mut caps: Vec<String> = Vec::new();
             for _ in 0..n {
                 let s = SKILLS[rng_range(&mut rng, 0, SKILLS.len() as u64) as usize].to_string();
@@ -66,7 +70,11 @@ fn build_request() -> SchedulingRequest {
 
     let covered: Vec<bool> = SKILLS
         .iter()
-        .map(|s| agents.iter().any(|a| a.capabilities.iter().any(|c| c == *s)))
+        .map(|s| {
+            agents
+                .iter()
+                .any(|a| a.capabilities.iter().any(|c| c == *s))
+        })
         .collect();
 
     let tasks: Vec<SchedulingTask> = (0..NUM_TASKS)
@@ -118,12 +126,12 @@ async fn main() {
         }
     }
     for t in &req.tasks {
-        *skill_tasks.entry(t.required_capability.clone()).or_default() += 1;
+        *skill_tasks
+            .entry(t.required_capability.clone())
+            .or_default() += 1;
     }
 
-    println!(
-        "\n══════════════════════════════════════════════════════════════"
-    );
+    println!("\n══════════════════════════════════════════════════════════════");
     println!("  MAATW Formation Demo");
     println!(
         "  {} agents · {} tasks · {} skills · horizon {} min",
@@ -132,9 +140,7 @@ async fn main() {
         SKILLS.len(),
         HORIZON
     );
-    println!(
-        "══════════════════════════════════════════════════════════════\n"
-    );
+    println!("══════════════════════════════════════════════════════════════\n");
 
     println!("Skill coverage (agents / tasks):");
     for s in SKILLS {
@@ -167,13 +173,13 @@ async fn main() {
     // Collect greedy and CP-SAT plans.
     let greedy_plan = strategies
         .iter()
-        .find(|f| f.id.starts_with("scheduling-plan-greedy:"))
-        .and_then(|f| serde_json::from_str::<SchedulingPlan>(&f.content).ok());
+        .find(|f| f.id().starts_with("scheduling-plan-greedy:"))
+        .and_then(|f| serde_json::from_str::<SchedulingPlan>(f.content()).ok());
 
     let cpsat_plan = strategies
         .iter()
-        .find(|f| f.id.starts_with("scheduling-plan-cpsat:"))
-        .and_then(|f| serde_json::from_str::<SchedulingPlan>(&f.content).ok());
+        .find(|f| f.id().starts_with("scheduling-plan-cpsat:"))
+        .and_then(|f| serde_json::from_str::<SchedulingPlan>(f.content()).ok());
 
     // ── Report ────────────────────────────────────────────────────────────────
 
@@ -181,10 +187,19 @@ async fn main() {
         let pct = g.tasks_scheduled as f64 / g.tasks_total as f64 * 100.0;
         let conf = (g.throughput_ratio() * 0.65 * 100.0).min(65.0);
         println!("── GreedySchedulerSuggestor ──────────────────────────────────");
-        println!("  Hint:        {}", GreedySchedulerSuggestor.complexity_hint().unwrap_or("-"));
-        println!("  Throughput:  {} / {} tasks  ({:.1}%)", g.tasks_scheduled, g.tasks_total, pct);
+        println!(
+            "  Hint:        {}",
+            GreedySchedulerSuggestor.complexity_hint().unwrap_or("-")
+        );
+        println!(
+            "  Throughput:  {} / {} tasks  ({:.1}%)",
+            g.tasks_scheduled, g.tasks_total, pct
+        );
         println!("  Makespan:    {} min", g.makespan_min);
-        println!("  Confidence:  {:.2}  (greedy cannot prove optimality)", conf / 100.0);
+        println!(
+            "  Confidence:  {:.2}  (greedy cannot prove optimality)",
+            conf / 100.0
+        );
         println!("  Time:        {:.2} ms\n", g.wall_time_seconds * 1000.0);
 
         println!("  Sample (first 5 by start):");
@@ -216,7 +231,10 @@ async fn main() {
             - greedy_plan.as_ref().map_or(0, |g| g.tasks_scheduled as i64);
 
         println!("── CpSatSchedulerSuggestor ───────────────────────────────────");
-        println!("  Hint:        {}", CpSatSchedulerSuggestor.complexity_hint().unwrap_or("-"));
+        println!(
+            "  Hint:        {}",
+            CpSatSchedulerSuggestor.complexity_hint().unwrap_or("-")
+        );
         println!("  Status:      {}", cp.status);
         println!(
             "  Throughput:  {} / {} tasks  ({:.1}%)  ← +{} vs greedy",
@@ -282,8 +300,7 @@ async fn main() {
             println!(
                 "  Gain:    +{} tasks over greedy  ({:.1}% throughput improvement)",
                 cp.tasks_scheduled as i64 - g.tasks_scheduled as i64,
-                (cp.tasks_scheduled as f64 - g.tasks_scheduled as f64)
-                    / g.tasks_scheduled as f64
+                (cp.tasks_scheduled as f64 - g.tasks_scheduled as f64) / g.tasks_scheduled as f64
                     * 100.0
             );
         }
@@ -292,7 +309,5 @@ async fn main() {
         _ => println!("  No plans produced."),
     }
 
-    println!(
-        "══════════════════════════════════════════════════════════════\n"
-    );
+    println!("══════════════════════════════════════════════════════════════\n");
 }

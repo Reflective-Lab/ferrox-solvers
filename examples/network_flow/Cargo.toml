@@ -1,0 +1,17 @@
+[workspace]
+
+[package]
+name = "network-flow"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "network_flow"
+path = "src/main.rs"
+
+[dependencies]
+ferrox        = { path = "../../crates/ferrox", package = "converge-ferrox-solver" }
+converge-core = "3.8.1"
+converge-pack = "3.8.1"
+serde_json    = "1"
+tokio         = { version = "1", features = ["macros", "rt-multi-thread"] }

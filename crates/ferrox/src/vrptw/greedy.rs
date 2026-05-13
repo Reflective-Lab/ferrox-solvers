@@ -1,7 +1,9 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, ProposedFact, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use std::time::Instant;
 use tracing::warn;
+
+use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
 
 use super::problem::{RouteStop, VrptwPlan, VrptwRequest};
 
@@ -39,6 +41,13 @@ impl Suggestor for NearestNeighborSuggestor {
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
+        let _span = suggestor_span(
+            self.name(),
+            ContextKey::Seeds,
+            ContextKey::Strategies,
+            ctx.count(ContextKey::Seeds),
+        )
+        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
@@ -56,13 +65,13 @@ impl Suggestor for NearestNeighborSuggestor {
                     let plan = solve_nn(&req);
                     let confidence = (plan.visit_ratio() * 0.60).min(0.60);
                     proposals.push(
-                        ProposedFact::new(
-                            ContextKey::Strategies,
-                            format!("{PLAN_PREFIX}{rid}"),
-                            serde_json::to_string(&plan).unwrap_or_default(),
-                            self.name(),
-                        )
-                        .with_confidence(confidence),
+                        FERROX_PROVENANCE
+                            .proposed_fact(
+                                ContextKey::Strategies,
+                                format!("{PLAN_PREFIX}{rid}"),
+                                serde_json::to_string(&plan).unwrap_or_default(),
+                            )
+                            .with_confidence(confidence),
                     );
                 }
                 Err(e) => {

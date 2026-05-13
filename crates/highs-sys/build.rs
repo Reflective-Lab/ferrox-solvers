@@ -13,6 +13,7 @@ fn build_with_highs() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let highs_build = env::var("FERROX_HIGHS_ROOT")
         .map_or_else(|_| workspace_root.join("vendor/highs/build"), PathBuf::from);
@@ -36,13 +37,37 @@ fn build_with_highs() {
         .compile("highs_wrapper");
 
     let lib_dir = highs_build.join("lib");
+    copy_runtime_libraries(&lib_dir, &out_dir);
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:LIB_DIR={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=highs");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out_dir.display());
 
     #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-lib=c++");
     #[cfg(target_os = "linux")]
     println!("cargo:rustc-link-lib=stdc++");
+}
+
+fn copy_runtime_libraries(lib_dir: &std::path::Path, out_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(lib_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+
+        let is_dylib = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("dylib"));
+        let is_highs_runtime = name.starts_with("libhighs") && (is_dylib || name.contains(".so"));
+        if is_highs_runtime {
+            let _ = std::fs::copy(&path, out_dir.join(name));
+        }
+    }
 }

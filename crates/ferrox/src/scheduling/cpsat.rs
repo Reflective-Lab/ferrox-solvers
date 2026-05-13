@@ -1,10 +1,12 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, ProposedFact, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::CpModel;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::warn;
+
+use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
 
 use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingTask, TaskAssignment};
 
@@ -56,6 +58,13 @@ impl Suggestor for CpSatSchedulerSuggestor {
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
+        let _span = suggestor_span(
+            self.name(),
+            ContextKey::Seeds,
+            ContextKey::Strategies,
+            ctx.count(ContextKey::Seeds),
+        )
+        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
@@ -77,13 +86,13 @@ impl Suggestor for CpSatSchedulerSuggestor {
                         _ => 0.0,
                     };
                     proposals.push(
-                        ProposedFact::new(
-                            ContextKey::Strategies,
-                            format!("{PLAN_PREFIX}{rid}"),
-                            serde_json::to_string(&plan).unwrap_or_default(),
-                            self.name(),
-                        )
-                        .with_confidence(confidence),
+                        FERROX_PROVENANCE
+                            .proposed_fact(
+                                ContextKey::Strategies,
+                                format!("{PLAN_PREFIX}{rid}"),
+                                serde_json::to_string(&plan).unwrap_or_default(),
+                            )
+                            .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
@@ -147,10 +156,11 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     let mut task_assign_names: Vec<Vec<String>> = vec![Vec::new(); req.tasks.len()];
 
     for (ti, task) in req.tasks.iter().enumerate() {
-        for agent in req
+        for (agent_idx, agent) in req
             .agents
             .iter()
-            .filter(|a| a.capabilities.contains(&task.required_capability))
+            .enumerate()
+            .filter(|(_, a)| a.capabilities.contains(&task.required_capability))
         {
             let x_name = x_var_name(task.id, agent.id);
             let ov_name = ov_var_name(task.id, agent.id);
@@ -166,7 +176,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
                 model.new_optional_interval_var(s_idx, task.duration_min, e_idx, x_idx, &ov_name);
             interval_name_to_idx.insert(ov_name, ov_idx);
 
-            agent_interval_idxs[agent.id].push(ov_idx);
+            agent_interval_idxs[agent_idx].push(ov_idx);
             task_assign_names[ti].push(x_name);
         }
     }
@@ -361,6 +371,17 @@ mod tests {
             .collect();
         assert_eq!(by_id[&1], 1);
         assert_eq!(by_id[&2], 0);
+    }
+
+    #[test]
+    fn supports_non_dense_agent_ids() {
+        let r = req(
+            vec![task(1, "py", 10, 0, 60), task(2, "py", 10, 0, 60)],
+            vec![agent(10, &["py"]), agent(20, &["py"])],
+        );
+        let plan = solve_cpsat(&r);
+        assert_eq!(plan.tasks_scheduled, 2);
+        assert!(plan.assignments.iter().any(|a| a.agent_id == 10));
     }
 
     #[tokio::test]

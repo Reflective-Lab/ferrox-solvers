@@ -1,7 +1,9 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, ProposedFact, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use std::time::Instant;
 use tracing::warn;
+
+use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
 
 use super::problem::{SchedulingPlan, SchedulingRequest, TaskAssignment};
 
@@ -43,6 +45,13 @@ impl Suggestor for GreedySchedulerSuggestor {
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
+        let _span = suggestor_span(
+            self.name(),
+            ContextKey::Seeds,
+            ContextKey::Strategies,
+            ctx.count(ContextKey::Seeds),
+        )
+        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
@@ -61,13 +70,13 @@ impl Suggestor for GreedySchedulerSuggestor {
                     // Greedy is fast but can't prove optimality — cap confidence at 0.65.
                     let confidence = (plan.throughput_ratio() * 0.65).min(0.65);
                     proposals.push(
-                        ProposedFact::new(
-                            ContextKey::Strategies,
-                            format!("{PLAN_PREFIX}{rid}"),
-                            serde_json::to_string(&plan).unwrap_or_default(),
-                            self.name(),
-                        )
-                        .with_confidence(confidence),
+                        FERROX_PROVENANCE
+                            .proposed_fact(
+                                ContextKey::Strategies,
+                                format!("{PLAN_PREFIX}{rid}"),
+                                serde_json::to_string(&plan).unwrap_or_default(),
+                            )
+                            .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
@@ -111,14 +120,15 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
         let best = req
             .agents
             .iter()
-            .filter(|a| a.capabilities.contains(&task.required_capability))
-            .min_by_key(|a| next_free[a.id].max(task.release_min));
+            .enumerate()
+            .filter(|(_, a)| a.capabilities.contains(&task.required_capability))
+            .map(|(idx, a)| (idx, a, next_free[idx].max(task.release_min)))
+            .min_by_key(|(_, a, start)| (*start, a.id));
 
-        if let Some(agent) = best {
-            let start = next_free[agent.id].max(task.release_min);
+        if let Some((idx, agent, start)) = best {
             let end = start + task.duration_min;
             if end <= task.deadline_min {
-                next_free[agent.id] = end;
+                next_free[idx] = end;
                 assignments.push(TaskAssignment {
                     task_id: task.id,
                     task_name: task.name.clone(),
@@ -251,6 +261,20 @@ mod tests {
         let agents: std::collections::HashSet<_> =
             plan.assignments.iter().map(|a| a.agent_id).collect();
         assert_eq!(agents.len(), 2, "should distribute across both agents");
+    }
+
+    #[test]
+    fn supports_non_dense_agent_ids() {
+        let req = req_with(
+            vec![
+                task(1, "t1", "py", 30, 0, 90),
+                task(2, "t2", "py", 30, 0, 90),
+            ],
+            vec![agent(10, "alice", &["py"]), agent(20, "bob", &["py"])],
+        );
+        let plan = solve_greedy(&req);
+        assert_eq!(plan.tasks_scheduled, 2);
+        assert_eq!(plan.assignments[0].agent_id, 10);
     }
 
     #[test]

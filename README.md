@@ -21,7 +21,7 @@ They are not optimisers.
 Given a staffing problem with 60 tasks, 12 agents, and tight time windows, a language model will produce a reasonable-sounding schedule — but it cannot prove that schedule is the best possible, cannot guarantee every constraint is met, and cannot tell you how far from optimal it is.
 
 Ferrox fills that gap.
-It exposes industrial-strength mathematical solvers — Google OR-Tools CP-SAT and HiGHS MIP — as first-class Converge Suggestors that live alongside LLM agents in the same Formation.
+It exposes industrial-strength mathematical solvers — Google OR-Tools CP-SAT, OR-Tools SimpleMinCostFlow, and HiGHS MIP — as first-class Converge Suggestors that live alongside LLM agents in the same Formation.
 The LLM understands the business context.
 Ferrox finds the provably correct answer within it.
 
@@ -31,7 +31,8 @@ Ferrox finds the provably correct answer within it.
 
 Ferrox is a Converge extension. Converge owns the shared suggestor contract and
 promotion authority; Ferrox owns solver models, native solver bindings,
-confidence semantics, and solver-backed suggestors.
+confidence semantics, solver-backed suggestors, typed proposal provenance, and
+suggestor-boundary tracing.
 
 ### Layout
 
@@ -111,18 +112,34 @@ The Engine runs all accepting Suggestors, collects their proposals, and lets con
 Ferrox contributes Suggestors that compete on provable quality.
 For every problem class, two implementations are available:
 
-| Problem class | Fast Suggestor | Confidence | Optimal Suggestor | Confidence |
+| Problem class | Fast / portable surface | Confidence | Native / stronger surface | Confidence |
 |---|---|---|---|---|
-| Task scheduling (MAATW) | `GreedySchedulerSuggestor` | ≤ 0.65 | `CpSatSchedulerSuggestor` | ≤ 1.0 |
-| Job Shop scheduling | `GreedyJobShopSuggestor` | ≤ 0.55 | `CpSatJobShopSuggestor` | ≤ 1.0 |
-| Vehicle routing (VRPTW) | `NearestNeighborSuggestor` | ≤ 0.60 | `CpSatVrptwSuggestor` | ≤ 1.0 |
+| Task scheduling (MAATW) | `converge_optimization::suggestors::GreedySchedulerSuggestor` | ≤ 0.65 | `CpSatSchedulerSuggestor` | ≤ 1.0 |
+| Job Shop scheduling | `PackSuggestor<JobShopSchedulingPack>` or `GreedyJobShopSuggestor` | ≤ 0.75 | `CpSatJobShopSuggestor` | ≤ 1.0 |
+| Vehicle routing (VRPTW) | `converge_optimization::suggestors::NearestNeighborTimeWindowRoutingSuggestor` | ≤ 0.60 | `CpSatVrptwSuggestor` | ≤ 1.0 |
 | Linear programs | — | — | `GlopLpSuggestor` | ≤ 1.0 |
 | Mixed-integer programs | — | — | `HighsMipSuggestor` | ≤ 1.0 |
 | General CP-SAT | — | — | `CpSatSuggestor` | ≤ 1.0 |
+| Network flow / min-cost flow | — | — | `MinCostFlowSuggestor` | ≤ 1.0 |
 
 The greedy Suggestor answers in microseconds.
 The solver Suggestor runs in parallel and either proves the greedy answer was optimal, or beats it.
 The Formation selects by confidence — no orchestration code required.
+
+For product code that needs to choose a registration set, Ferrox exposes a
+machine-readable catalog:
+
+```rust
+use ferrox::catalog::{recommend_for_use_case, CommonUseCase};
+
+let candidates = recommend_for_use_case(CommonUseCase::FieldCrewScheduling);
+assert_eq!(candidates[0].symbol, "CpSatSchedulerSuggestor");
+```
+
+The catalog includes Ferrox native Suggestors, `converge-optimization` pure
+Rust baselines and Packs, and explicit deferred entries such as SMT
+counterexample search. Use it to avoid routing a use case to a solver just
+because the solver happens to be compiled in.
 
 ### How confidence works
 
@@ -266,7 +283,7 @@ On a three-shift operation, that difference compounds into days of recovered cap
 
 | Library | Version | Algorithm | Best for |
 |---------|---------|-----------|----------|
-| Google OR-Tools CP-SAT | 9.15 | DPLL(T) + LNS + clause learning | Scheduling, routing, combinatorial assignment |
+| Google OR-Tools CP-SAT / SimpleMinCostFlow | 9.15 | DPLL(T), LNS, clause learning, network simplex-style flow | Scheduling, routing, combinatorial assignment, min-cost flow |
 | HiGHS | 1.14 | Revised simplex + branch-and-cut | LP relaxations, pure MIP, capital allocation |
 
 Both are compiled from source and linked statically into the gRPC server.
@@ -324,6 +341,7 @@ just example-maatw      # Multi-Agent Task Assignment with Time Windows
 just example-jspbench   # Job Shop Scheduling (15 jobs × 10 machines)
 just example-vrptw      # Vehicle Routing with Time Windows (20 customers)
 just example-cp         # Sudoku via CP-SAT (generic CpSatSuggestor)
+just example-flow       # Min-cost network flow (MinCostFlowSuggestor)
 just example-mip        # Capital allocation via HiGHS MIP
 ```
 
@@ -395,9 +413,10 @@ crates/
       vrptw/            VRPTW — vehicle routing with time windows
       cp/               Generic CP-SAT Suggestor (any CpSatRequest)
       lp/               Generic LP Suggestor (GLOP)
+      network_flow/     Network-flow Suggestor (OR-Tools SimpleMinCostFlow)
       mip/              Generic MIP Suggestor (HiGHS)
   ferrox-server/        gRPC server (TLS, auth, Docker)
-  ortools-sys/          Rust FFI to OR-Tools CP-SAT
+  ortools-sys/          Rust FFI to OR-Tools CP-SAT, GLOP, and SimpleMinCostFlow
   highs-sys/            Rust FFI to HiGHS
 
 examples/
@@ -405,6 +424,7 @@ examples/
   jspbench/             Formation demo: job shop
   vrptw/                Formation demo: vehicle routing
   cp_sudoku/            Formation demo: sudoku via generic CP-SAT
+  network_flow/         Formation demo: min-cost flow via SimpleMinCostFlow
   highs_mip/            Formation demo: capital allocation via MIP
 
 proto/                  Protobuf definitions (ferrox.v1)

@@ -91,6 +91,11 @@ example-cp:
     DYLD_LIBRARY_PATH="$(pwd)/vendor/ortools/build/lib:${DYLD_LIBRARY_PATH:-}" \
         cargo run --manifest-path examples/cp_sudoku/Cargo.toml --features ferrox/ortools
 
+# Run OR-Tools min-cost-flow example. Requires `just deps-ortools`.
+example-flow:
+    DYLD_LIBRARY_PATH="$(pwd)/vendor/ortools/build/lib:${DYLD_LIBRARY_PATH:-}" \
+        cargo run --manifest-path examples/network_flow/Cargo.toml --features ferrox/ortools
+
 # Run HiGHS MIP example. Requires `just deps-highs`.
 example-mip:
     DYLD_LIBRARY_PATH="$(pwd)/vendor/highs/build/lib:${DYLD_LIBRARY_PATH:-}" \

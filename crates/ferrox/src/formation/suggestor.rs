@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use converge_model::formation::{FormationPlan, FormationRequest, ProfileSnapshot, RoleAssignment};
-use converge_pack::{AgentEffect, Context, ContextKey, ProposedFact, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use ferrox_ortools_sys::safe::CpModel;
 use tracing::warn;
+
+use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
 
 // Uses a distinct prefix from converge-optimization's FormationAssemblySuggestor
 // so both can coexist in the same engine.
@@ -49,6 +51,13 @@ impl Suggestor for CpSatFormationSuggestor {
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
+        let _span = suggestor_span(
+            self.name(),
+            ContextKey::Seeds,
+            ContextKey::Strategies,
+            ctx.count(ContextKey::Seeds),
+        )
+        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
@@ -66,13 +75,13 @@ impl Suggestor for CpSatFormationSuggestor {
                     let plan = assemble_cp(&req, &self.catalog);
                     let confidence = plan.coverage_ratio;
                     proposals.push(
-                        ProposedFact::new(
-                            ContextKey::Strategies,
-                            format!("{PLAN_PREFIX}{}", plan.request_id),
-                            serde_json::to_string(&plan).unwrap_or_default(),
-                            self.name(),
-                        )
-                        .with_confidence(confidence),
+                        FERROX_PROVENANCE
+                            .proposed_fact(
+                                ContextKey::Strategies,
+                                format!("{PLAN_PREFIX}{}", plan.request_id),
+                                serde_json::to_string(&plan).unwrap_or_default(),
+                            )
+                            .with_confidence(confidence),
                     );
                 }
                 Err(e) => {

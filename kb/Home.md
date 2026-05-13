@@ -13,6 +13,7 @@ Knowledge base for the `ferrox` Converge extension.
 
 ## Architecture
 
+- [[Architecture/Capability Map]] — upstream solver capabilities vs Ferrox wrapper posture
 - [[Architecture/Surface]] — public crate surface and contract shape
 
 ## Building

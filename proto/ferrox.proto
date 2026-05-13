@@ -20,9 +20,10 @@ message StringI64 {
 // ─── CP-SAT ──────────────────────────────────────────────────────────────────
 
 message CpVariable {
-  string name = 1;
-  int64  lb   = 2;
-  int64  ub   = 3;
+  string name    = 1;
+  int64  lb      = 2;
+  int64  ub      = 3;
+  bool   is_bool = 4;
 }
 
 message CpTerm {
@@ -39,22 +40,95 @@ message CpAllDifferent {
   repeated string vars = 1;
 }
 
+message CpBoolLiteral {
+  string var     = 1;
+  bool   negated = 2;
+}
+
+message CpBoolLiterals {
+  repeated CpBoolLiteral literals = 1;
+}
+
+message CpImplication {
+  CpBoolLiteral antecedent = 1;
+  CpBoolLiteral consequent = 2;
+}
+
+message CpTuple {
+  repeated int64 values = 1;
+}
+
+message CpAllowedAssignments {
+  repeated string  vars   = 1;
+  repeated CpTuple tuples = 2;
+}
+
+message CpIntervalVar {
+  string name      = 1;
+  string start_var = 2;
+  int64  duration  = 3;
+  string end_var   = 4;
+}
+
+message CpOptionalIntervalVar {
+  string name      = 1;
+  string start_var = 2;
+  int64  duration  = 3;
+  string end_var   = 4;
+  string lit_var   = 5;
+}
+
+message CpNoOverlap {
+  repeated string intervals = 1;
+}
+
+message CpCumulativeDemand {
+  string interval = 1;
+  int64  demand   = 2;
+}
+
+message CpCumulative {
+  repeated CpCumulativeDemand demands = 1;
+  int64                       capacity = 2;
+}
+
+message CpNoOverlap2DRectangle {
+  string x_interval = 1;
+  string y_interval = 2;
+}
+
+message CpNoOverlap2D {
+  repeated CpNoOverlap2DRectangle rectangles = 1;
+}
+
 message CpConstraint {
   oneof kind {
-    CpLinear       linear_le     = 1;
-    CpLinear       linear_ge     = 2;
-    CpLinear       linear_eq     = 3;
-    CpAllDifferent all_different = 4;
+    CpLinear             linear_le           = 1;
+    CpLinear             linear_ge           = 2;
+    CpLinear             linear_eq           = 3;
+    CpAllDifferent       all_different       = 4;
+    CpBoolLiterals       bool_or             = 5;
+    CpBoolLiterals       bool_and            = 6;
+    CpBoolLiterals       bool_xor            = 7;
+    CpImplication        implication         = 8;
+    CpBoolLiterals       at_most_one         = 9;
+    CpBoolLiterals       exactly_one         = 10;
+    CpAllowedAssignments allowed_assignments = 11;
+    CpNoOverlap          no_overlap          = 12;
+    CpCumulative         cumulative          = 13;
+    CpNoOverlap2D        no_overlap_2d       = 14;
   }
 }
 
 message SolveCpRequest {
-  string               id                 = 1;
-  repeated CpVariable  variables          = 2;
-  repeated CpConstraint constraints       = 3;
-  repeated CpTerm      objective_terms    = 4;
-  bool                 minimize           = 5;
-  optional double      time_limit_seconds = 6;
+  string                         id                     = 1;
+  repeated CpVariable            variables              = 2;
+  repeated CpConstraint          constraints            = 3;
+  repeated CpTerm                objective_terms        = 4;
+  bool                           minimize               = 5;
+  optional double                time_limit_seconds     = 6;
+  repeated CpIntervalVar         interval_vars          = 7;
+  repeated CpOptionalIntervalVar optional_interval_vars = 8;
 }
 
 message SolveCpResponse {

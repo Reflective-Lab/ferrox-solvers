@@ -7,6 +7,7 @@ Major entities in the `ferrox` knowledge base.
 
 ## Architecture
 
+- [Capability Map](Architecture/Capability%20Map.md) — upstream solver capabilities vs Ferrox wrapper posture
 - [Surface](Architecture/Surface.md) — public crate surface and contract shape
 
 ## Building

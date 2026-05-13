@@ -9,11 +9,15 @@ plus optional adapter crates with adapter-qualified names.
 
 ## Public surface
 
-- `ferrox` — _one-line description of the public crate_
+- `ferrox` — solver models, native solver wrappers, and solver-backed
+  Converge suggestors.
+- `ProvenanceSource` and `FERROX_PROVENANCE` for typed proposal provenance
+  before crossing into `converge-pack::ProposedFact`.
+- `ferrox.suggestor.execute` tracing spans on solver suggestor execution.
 
 ## Contract dependencies
 
-- `converge-pack` — `Pack`, `ProposedPlan`, `ProblemSpec`
+- `converge-pack` — `Pack`, `ProposedFact`, `ProposedPlan`, `ProblemSpec`
 - `converge-model` — semantic types
 - `converge-provider` — capability identity (when applicable)
 

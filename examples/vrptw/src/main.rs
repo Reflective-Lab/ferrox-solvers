@@ -106,25 +106,29 @@ async fn main() {
     let req = build_request();
     let n = req.customers.len();
 
-    println!(
-        "\n══════════════════════════════════════════════════════════════"
-    );
+    println!("\n══════════════════════════════════════════════════════════════");
     println!("  VRPTW Formation Demo");
     println!(
         "  {} customers   depot ({:.0},{:.0})   horizon {}",
         n, req.depot.x, req.depot.y, req.depot.due_time
     );
-    println!(
-        "══════════════════════════════════════════════════════════════\n"
-    );
+    println!("══════════════════════════════════════════════════════════════\n");
 
     // Print customer table.
     println!("  Customer table:");
-    println!("  {:>4}  {:>6}  {:>6}  {:>6}  {:>6}  {:>4}  {:>5}", "ID", "X", "Y", "Open", "Close", "Svc", "TW");
+    println!(
+        "  {:>4}  {:>6}  {:>6}  {:>6}  {:>6}  {:>4}  {:>5}",
+        "ID", "X", "Y", "Open", "Close", "Svc", "TW"
+    );
     for c in &req.customers {
         println!(
             "  {:>4}  {:>6.1}  {:>6.1}  {:>6}  {:>6}  {:>4}  {:>5}",
-            c.name, c.x, c.y, c.window_open, c.window_close, c.service_time,
+            c.name,
+            c.x,
+            c.y,
+            c.window_open,
+            c.window_close,
+            c.service_time,
             c.window_close - c.window_open
         );
     }
@@ -149,23 +153,27 @@ async fn main() {
 
     let nn_plan = strategies
         .iter()
-        .find(|f| f.id.starts_with("vrptw-plan-greedy:"))
-        .and_then(|f| serde_json::from_str::<VrptwPlan>(&f.content).ok());
+        .find(|f| f.id().starts_with("vrptw-plan-greedy:"))
+        .and_then(|f| serde_json::from_str::<VrptwPlan>(f.content()).ok());
 
     let cpsat_plan = strategies
         .iter()
-        .find(|f| f.id.starts_with("vrptw-plan-cpsat:"))
-        .and_then(|f| serde_json::from_str::<VrptwPlan>(&f.content).ok());
+        .find(|f| f.id().starts_with("vrptw-plan-cpsat:"))
+        .and_then(|f| serde_json::from_str::<VrptwPlan>(f.content()).ok());
 
     // ── Report ────────────────────────────────────────────────────────────────
 
     if let Some(g) = &nn_plan {
         let conf = g.visit_ratio() * 0.60;
         println!("── NearestNeighborSuggestor ──────────────────────────────────");
-        println!("  Hint:       {}", NearestNeighborSuggestor.complexity_hint().unwrap_or("-"));
+        println!(
+            "  Hint:       {}",
+            NearestNeighborSuggestor.complexity_hint().unwrap_or("-")
+        );
         println!(
             "  Visited:    {} / {}  ({:.1}%)",
-            g.customers_visited, g.customers_total,
+            g.customers_visited,
+            g.customers_total,
             g.visit_ratio() * 100.0
         );
         println!("  Distance:   {:.1}", g.total_distance);
@@ -194,11 +202,15 @@ async fn main() {
             - nn_plan.as_ref().map_or(0, |g| g.customers_visited as i64);
 
         println!("── CpSatVrptwSuggestor ───────────────────────────────────────");
-        println!("  Hint:       {}", CpSatVrptwSuggestor.complexity_hint().unwrap_or("-"));
+        println!(
+            "  Hint:       {}",
+            CpSatVrptwSuggestor.complexity_hint().unwrap_or("-")
+        );
         println!("  Status:     {}", cp.status);
         println!(
             "  Visited:    {} / {}  ({:.1}%)  ← +{} vs greedy",
-            cp.customers_visited, cp.customers_total,
+            cp.customers_visited,
+            cp.customers_total,
             cp.visit_ratio() * 100.0,
             extra
         );
@@ -244,7 +256,5 @@ async fn main() {
         _ => println!("  No plans produced."),
     }
 
-    println!(
-        "══════════════════════════════════════════════════════════════\n"
-    );
+    println!("══════════════════════════════════════════════════════════════\n");
 }

@@ -59,14 +59,14 @@ dependencies = [
 
 [[package]]
 name = "converge-ferrox-ortools-sys"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "converge-ferrox-solver"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "converge-ferrox-ortools-sys",

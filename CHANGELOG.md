@@ -7,6 +7,42 @@ Versioning before 1.0 with the usual pre-1.0 compatibility caveats.
 
 ## [Unreleased]
 
+### Added
+
+- OR-Tools SimpleMinCostFlow wrapper and `MinCostFlowSuggestor` for
+  `network-flow-request:*` seeds, including happy-path, negative, and
+  property tests.
+- Public re-exports and a `just example-flow` Formation demo for discovering
+  the new min-cost-flow Suggestor surface.
+- CP-SAT Boolean, table, optional-interval, cumulative, and 2D no-overlap
+  request primitives across the Rust and gRPC conversion surfaces.
+- Capability-map documentation that distinguishes Ferrox optimization/search
+  from deferred SMT-style satisfiability work and from the existing
+  `converge-optimization` pure Rust baseline, with a Suggestor-first rule for
+  exposing solver capabilities and an explicit owner split for portable
+  scheduling/routing baselines.
+- Machine-readable `ferrox::catalog` selection guidance for matching common
+  use cases to Suggestors, Packs, native features, seed prefixes, plan prefixes,
+  and confidence expectations.
+- Typed `ProvenanceSource` / `FERROX_PROVENANCE` adapter so solver-backed
+  proposals use Ferrox's canonical provenance at the `ProposedFact` boundary.
+- `ferrox.suggestor.execute` tracing spans at solver suggestor boundaries,
+  with structured provenance, suggestor name, context keys, and input count.
+
+### Changed
+
+- OR-Tools native dependency reconciliation now verifies the requested
+  `ORTOOLS_TAG` and rebuilds ignored local vendor checkouts when the tag or
+  generated CMake config is stale.
+
+### Fixed
+
+- Greedy and CP-SAT task scheduling now handle stable, non-dense agent IDs
+  without indexing the internal availability arrays by public agent ID.
+- OR-Tools and HiGHS sys crates copy native runtime libraries into Cargo's
+  build output and add that output to the runtime search path, so downstream
+  examples and tests can launch without hand-setting `DYLD_LIBRARY_PATH`.
+
 ## [0.5.0] - 2026-05-07
 
 ### Added

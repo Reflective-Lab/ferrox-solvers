@@ -82,20 +82,21 @@ async fn main() {
     let req = build_request();
 
     let horizon = req.horizon();
-    let total_work: i64 = req.jobs.iter().flat_map(|j| j.operations.iter()).map(|o| o.duration).sum();
+    let total_work: i64 = req
+        .jobs
+        .iter()
+        .flat_map(|j| j.operations.iter())
+        .map(|o| o.duration)
+        .sum();
     let lower_bound_estimate = total_work / NUM_MACHINES as i64;
 
-    println!(
-        "\n══════════════════════════════════════════════════════════════"
-    );
+    println!("\n══════════════════════════════════════════════════════════════");
     println!("  Job Shop Scheduling Formation Demo");
     println!(
         "  {} jobs × {} machines   horizon {}   work {} (LB≈{})",
         NUM_JOBS, NUM_MACHINES, horizon, total_work, lower_bound_estimate
     );
-    println!(
-        "══════════════════════════════════════════════════════════════\n"
-    );
+    println!("══════════════════════════════════════════════════════════════\n");
 
     // ── Formation: two suggestors, one engine ─────────────────────────────────
 
@@ -116,19 +117,22 @@ async fn main() {
 
     let greedy_plan = strategies
         .iter()
-        .find(|f| f.id.starts_with("jspbench-plan-greedy:"))
-        .and_then(|f| serde_json::from_str::<JobShopPlan>(&f.content).ok());
+        .find(|f| f.id().starts_with("jspbench-plan-greedy:"))
+        .and_then(|f| serde_json::from_str::<JobShopPlan>(f.content()).ok());
 
     let cpsat_plan = strategies
         .iter()
-        .find(|f| f.id.starts_with("jspbench-plan-cpsat:"))
-        .and_then(|f| serde_json::from_str::<JobShopPlan>(&f.content).ok());
+        .find(|f| f.id().starts_with("jspbench-plan-cpsat:"))
+        .and_then(|f| serde_json::from_str::<JobShopPlan>(f.content()).ok());
 
     // ── Report ────────────────────────────────────────────────────────────────
 
     if let Some(g) = &greedy_plan {
         println!("── GreedyJobShopSuggestor ────────────────────────────────────");
-        println!("  Hint:        {}", GreedyJobShopSuggestor.complexity_hint().unwrap_or("-"));
+        println!(
+            "  Hint:        {}",
+            GreedyJobShopSuggestor.complexity_hint().unwrap_or("-")
+        );
         println!("  Makespan:    {}", g.makespan);
         println!("  Confidence:  0.55  (SPT heuristic, cannot prove optimality)");
         println!("  Time:        {:.2} ms\n", g.wall_time_seconds * 1000.0);
@@ -140,7 +144,11 @@ async fn main() {
         }
         println!("  Machine utilisation  (makespan = {}):", g.makespan);
         for (m, busy) in machine_busy.iter().enumerate() {
-            let pct = if g.makespan > 0 { *busy * 100 / g.makespan } else { 0 };
+            let pct = if g.makespan > 0 {
+                *busy * 100 / g.makespan
+            } else {
+                0
+            };
             println!("    M{m:02}  {busy:4} / {}  ({pct:2}%)", g.makespan);
         }
         println!();
@@ -157,7 +165,10 @@ async fn main() {
         });
 
         println!("── CpSatJobShopSuggestor ─────────────────────────────────────");
-        println!("  Hint:        {}", CpSatJobShopSuggestor.complexity_hint().unwrap_or("-"));
+        println!(
+            "  Hint:        {}",
+            CpSatJobShopSuggestor.complexity_hint().unwrap_or("-")
+        );
         println!("  Status:      {}", cp.status);
         println!(
             "  Makespan:    {}   ← {:.1}% better than greedy",
@@ -174,7 +185,12 @@ async fn main() {
         for op in cp.schedule.iter().take(8) {
             println!(
                 "    M{:02}  {:8}  op{}  t={:4}..{:4}  dur={}",
-                op.machine_id, op.job_name, op.op_index, op.start, op.end, op.end - op.start
+                op.machine_id,
+                op.job_name,
+                op.op_index,
+                op.start,
+                op.end,
+                op.end - op.start
             );
         }
         println!();
@@ -203,7 +219,5 @@ async fn main() {
         _ => println!("  No plans produced."),
     }
 
-    println!(
-        "══════════════════════════════════════════════════════════════\n"
-    );
+    println!("══════════════════════════════════════════════════════════════\n");
 }
