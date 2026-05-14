@@ -2,12 +2,12 @@ use async_trait::async_trait;
 use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use ferrox_highs_sys::HighsModelStatus;
 use ferrox_highs_sys::safe::HighsSolver;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
 
-use super::problem::{MipPlan, MipRequest, VarKind};
+use super::problem::{MipPlan, MipRequest, MipTerm, VarKind};
 
 const REQUEST_PREFIX: &str = "mip-request:";
 const PLAN_PREFIX: &str = "mip-plan:";
@@ -25,7 +25,7 @@ impl Suggestor for HighsMipSuggestor {
     }
 
     fn complexity_hint(&self) -> Option<&'static str> {
-        Some("MIP branch-and-cut via HiGHS v1.7; NP-hard in general")
+        Some("MIP branch-and-cut via HiGHS v1.14; NP-hard in general")
     }
 
     fn accepts(&self, ctx: &dyn Context) -> bool {
@@ -98,6 +98,11 @@ fn plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 }
 
 pub fn solve_mip(req: &MipRequest) -> MipPlan {
+    if let Err(reason) = validate_mip_request(req) {
+        warn!(request_id = %req.id, reason = %reason, "invalid mip-request");
+        return invalid_plan(req);
+    }
+
     let mut solver = HighsSolver::new();
 
     // HiGHS cost sign: we pass costs directly; HiGHS minimizes by default.
@@ -183,6 +188,59 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
         mip_gap,
         solver: "highs-v1.14.0".to_string(),
     }
+}
+
+fn invalid_plan(req: &MipRequest) -> MipPlan {
+    MipPlan {
+        request_id: req.id.clone(),
+        status: "invalid".to_string(),
+        values: Vec::new(),
+        objective_value: 0.0,
+        mip_gap: f64::INFINITY,
+        solver: "highs-v1.14.0".to_string(),
+    }
+}
+
+fn validate_mip_request(req: &MipRequest) -> Result<(), String> {
+    let mut vars = HashSet::new();
+    for var in &req.variables {
+        if var.name.trim().is_empty() {
+            return Err("variable name must not be empty".to_string());
+        }
+        if !vars.insert(var.name.as_str()) {
+            return Err(format!("duplicate variable '{}'", var.name));
+        }
+        if var.lb > var.ub {
+            return Err(format!("variable '{}' has lb > ub", var.name));
+        }
+    }
+
+    validate_mip_terms(&req.objective.terms, &vars, "objective")?;
+
+    for constraint in &req.constraints {
+        if constraint.lb > constraint.ub {
+            return Err(format!("constraint '{}' has lb > ub", constraint.name));
+        }
+        validate_mip_terms(&constraint.terms, &vars, "constraint")?;
+    }
+
+    Ok(())
+}
+
+fn validate_mip_terms(
+    terms: &[MipTerm],
+    vars: &HashSet<&str>,
+    label: &'static str,
+) -> Result<(), String> {
+    for term in terms {
+        if !vars.contains(term.var.as_str()) {
+            return Err(format!(
+                "{label} references unknown variable '{}'",
+                term.var
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -329,6 +387,47 @@ mod tests {
         assert_eq!(plan.status, "infeasible");
         assert!(plan.mip_gap.is_infinite());
         assert_eq!(plan.values.len(), 0);
+    }
+
+    #[test]
+    fn rejects_unknown_constraint_reference_as_invalid() {
+        let req = MipRequest {
+            id: "bad-constraint".into(),
+            variables: vec![binary("x")],
+            constraints: vec![MipConstraint {
+                name: "bad".into(),
+                lb: f64::NEG_INFINITY,
+                ub: 1.0,
+                terms: vec![term("missing", 1.0)],
+            }],
+            objective: MipObjective {
+                terms: vec![term("x", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: None,
+        };
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.values.is_empty());
+    }
+
+    #[test]
+    fn rejects_unknown_objective_reference_as_invalid() {
+        let req = MipRequest {
+            id: "bad-objective".into(),
+            variables: vec![binary("x")],
+            constraints: vec![],
+            objective: MipObjective {
+                terms: vec![term("missing", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: None,
+        };
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.values.is_empty());
     }
 
     #[test]

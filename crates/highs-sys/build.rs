@@ -30,7 +30,7 @@ fn build_with_highs() {
         .cpp(true)
         .std("c++17")
         .file("highs_wrapper.cc")
-        .include(highs_src.join("src"))
+        .include(highs_src.join("highs"))
         .include(&highs_build)
         .flag_if_supported("-Wno-unused-parameter")
         .flag_if_supported("-Wno-deprecated-declarations")

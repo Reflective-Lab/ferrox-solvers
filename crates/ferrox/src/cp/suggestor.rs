@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::CpModel;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
@@ -99,6 +99,11 @@ fn plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 
 #[allow(clippy::too_many_lines)]
 pub fn solve_cp(req: &CpSatRequest) -> CpSatPlan {
+    if let Err(reason) = validate_cp_request(req) {
+        warn!(request_id = %req.id, reason = %reason, "invalid cpsat-request");
+        return invalid_plan(req);
+    }
+
     let mut model = CpModel::new();
     let mut name_to_idx: HashMap<String, i32> = HashMap::new();
     let mut bool_name_to_idx: HashMap<String, i32> = HashMap::new();
@@ -309,6 +314,234 @@ pub fn solve_cp(req: &CpSatRequest) -> CpSatPlan {
         objective_value,
         wall_time_seconds: solution.wall_time(),
         solver: "cp-sat-v9.15".to_string(),
+    }
+}
+
+fn invalid_plan(req: &CpSatRequest) -> CpSatPlan {
+    CpSatPlan {
+        request_id: req.id.clone(),
+        status: "invalid".to_string(),
+        assignments: Vec::new(),
+        objective_value: None,
+        wall_time_seconds: 0.0,
+        solver: "cp-sat-v9.15".to_string(),
+    }
+}
+
+fn validate_cp_request(req: &CpSatRequest) -> Result<(), String> {
+    let (vars, bools) = validate_cp_variables(req)?;
+    let intervals = validate_cp_intervals(req, &vars, &bools)?;
+    validate_cp_constraints(&req.constraints, &vars, &bools, &intervals)?;
+    if let Some(objective_terms) = &req.objective_terms {
+        validate_terms(objective_terms, &vars)?;
+    }
+
+    Ok(())
+}
+
+fn validate_cp_variables(req: &CpSatRequest) -> Result<(HashSet<&str>, HashSet<&str>), String> {
+    let mut vars = HashSet::new();
+    let mut bools = HashSet::new();
+
+    for var in &req.variables {
+        if var.name.trim().is_empty() {
+            return Err("variable name must not be empty".to_string());
+        }
+        if !vars.insert(var.name.as_str()) {
+            return Err(format!("duplicate variable '{}'", var.name));
+        }
+        if var.lb > var.ub {
+            return Err(format!("variable '{}' has lb > ub", var.name));
+        }
+        if var.is_bool {
+            if var.lb != 0 || var.ub != 1 {
+                return Err(format!(
+                    "bool variable '{}' must have domain 0..1",
+                    var.name
+                ));
+            }
+            bools.insert(var.name.as_str());
+        }
+    }
+
+    Ok((vars, bools))
+}
+
+fn validate_cp_intervals<'a>(
+    req: &'a CpSatRequest,
+    vars: &HashSet<&str>,
+    bools: &HashSet<&str>,
+) -> Result<HashSet<&'a str>, String> {
+    let mut intervals = HashSet::new();
+    for interval in &req.interval_vars {
+        validate_interval_name(&mut intervals, &interval.name)?;
+        validate_var_ref(vars, &interval.start_var, "interval start")?;
+        validate_var_ref(vars, &interval.end_var, "interval end")?;
+        validate_duration(interval.duration, &interval.name)?;
+    }
+    for interval in &req.optional_interval_vars {
+        validate_interval_name(&mut intervals, &interval.name)?;
+        validate_var_ref(vars, &interval.start_var, "optional interval start")?;
+        validate_var_ref(vars, &interval.end_var, "optional interval end")?;
+        validate_var_ref(bools, &interval.lit_var, "optional interval literal")?;
+        validate_duration(interval.duration, &interval.name)?;
+    }
+
+    Ok(intervals)
+}
+
+fn validate_cp_constraints(
+    constraints: &[ConstraintKind],
+    vars: &HashSet<&str>,
+    bools: &HashSet<&str>,
+    intervals: &HashSet<&str>,
+) -> Result<(), String> {
+    for constraint in constraints {
+        validate_cp_constraint(constraint, vars, bools, intervals)?;
+    }
+    Ok(())
+}
+
+fn validate_cp_constraint(
+    constraint: &ConstraintKind,
+    vars: &HashSet<&str>,
+    bools: &HashSet<&str>,
+    intervals: &HashSet<&str>,
+) -> Result<(), String> {
+    match constraint {
+        ConstraintKind::LinearLe { terms, .. }
+        | ConstraintKind::LinearGe { terms, .. }
+        | ConstraintKind::LinearEq { terms, .. } => validate_terms(terms, vars),
+        ConstraintKind::AllDifferent {
+            vars: constraint_vars,
+        } => validate_var_refs(vars, constraint_vars, "AllDifferent"),
+        ConstraintKind::BoolOr { literals }
+        | ConstraintKind::BoolAnd { literals }
+        | ConstraintKind::BoolXor { literals }
+        | ConstraintKind::AtMostOne { literals }
+        | ConstraintKind::ExactlyOne { literals } => validate_literals(literals, bools),
+        ConstraintKind::Implication {
+            antecedent,
+            consequent,
+        } => {
+            validate_literal(antecedent, bools)?;
+            validate_literal(consequent, bools)
+        }
+        ConstraintKind::AllowedAssignments {
+            vars: constraint_vars,
+            tuples,
+        } => validate_allowed_assignments(vars, constraint_vars, tuples),
+        ConstraintKind::NoOverlap {
+            intervals: constraint_intervals,
+        } => validate_var_refs(intervals, constraint_intervals, "NoOverlap"),
+        ConstraintKind::Cumulative { demands, capacity } => {
+            validate_cumulative(intervals, demands, *capacity)
+        }
+        ConstraintKind::NoOverlap2D { rectangles } => {
+            for rectangle in rectangles {
+                validate_var_ref(intervals, &rectangle.x_interval, "NoOverlap2D x interval")?;
+                validate_var_ref(intervals, &rectangle.y_interval, "NoOverlap2D y interval")?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_allowed_assignments(
+    vars: &HashSet<&str>,
+    constraint_vars: &[String],
+    tuples: &[Vec<i64>],
+) -> Result<(), String> {
+    validate_var_refs(vars, constraint_vars, "AllowedAssignments")?;
+    if let Some(tuple) = tuples
+        .iter()
+        .find(|tuple| tuple.len() != constraint_vars.len())
+    {
+        return Err(format!(
+            "AllowedAssignments tuple arity {} does not match variable count {}",
+            tuple.len(),
+            constraint_vars.len()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_cumulative(
+    intervals: &HashSet<&str>,
+    demands: &[super::problem::CumulativeDemand],
+    capacity: i64,
+) -> Result<(), String> {
+    if capacity < 0 {
+        return Err("Cumulative capacity must be non-negative".to_string());
+    }
+    for demand in demands {
+        validate_var_ref(intervals, &demand.interval, "Cumulative interval")?;
+        if demand.demand < 0 {
+            return Err(format!(
+                "Cumulative demand for '{}' must be non-negative",
+                demand.interval
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_interval_name<'a>(
+    intervals: &mut HashSet<&'a str>,
+    name: &'a str,
+) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("interval name must not be empty".to_string());
+    }
+    if intervals.insert(name) {
+        Ok(())
+    } else {
+        Err(format!("duplicate interval '{name}'"))
+    }
+}
+
+fn validate_duration(duration: i64, name: &str) -> Result<(), String> {
+    if duration < 0 {
+        Err(format!("interval '{name}' has negative duration"))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_terms(terms: &[CpTerm], vars: &HashSet<&str>) -> Result<(), String> {
+    for term in terms {
+        validate_var_ref(vars, &term.var, "linear term")?;
+    }
+    Ok(())
+}
+
+fn validate_literals(literals: &[CpBoolLiteral], bools: &HashSet<&str>) -> Result<(), String> {
+    for literal in literals {
+        validate_literal(literal, bools)?;
+    }
+    Ok(())
+}
+
+fn validate_literal(literal: &CpBoolLiteral, bools: &HashSet<&str>) -> Result<(), String> {
+    validate_var_ref(bools, &literal.var, "bool literal")
+}
+
+fn validate_var_refs(
+    known: &HashSet<&str>,
+    refs: &[String],
+    label: &'static str,
+) -> Result<(), String> {
+    for name in refs {
+        validate_var_ref(known, name, label)?;
+    }
+    Ok(())
+}
+
+fn validate_var_ref(known: &HashSet<&str>, name: &str, label: &'static str) -> Result<(), String> {
+    if known.contains(name) {
+        Ok(())
+    } else {
+        Err(format!("{label} references unknown name '{name}'"))
     }
 }
 
@@ -848,8 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_unknown_var_references() {
-        // interval_var references unknown start/end: warning, no panic.
+    fn rejects_unknown_var_references_as_invalid() {
         let req = CpSatRequest {
             id: "u".into(),
             variables: vec![var("s", 0, 10)],
@@ -872,11 +1104,25 @@ mod tests {
             time_limit_seconds: Some(0.5),
         };
         let plan = solve_cp(&req);
-        // Solver still runs on the orphan var; no panic.
-        assert!(matches!(
-            plan.status.as_str(),
-            "optimal" | "feasible" | "error"
-        ));
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.assignments.is_empty());
+    }
+
+    #[test]
+    fn rejects_unknown_objective_reference_as_invalid() {
+        let req = CpSatRequest {
+            id: "bad-objective".into(),
+            variables: vec![var("x", 0, 10)],
+            interval_vars: vec![],
+            optional_interval_vars: vec![],
+            constraints: vec![],
+            objective_terms: Some(vec![term("missing", 1)]),
+            minimize: true,
+            time_limit_seconds: Some(0.5),
+        };
+        let plan = solve_cp(&req);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.objective_value.is_none());
     }
 
     #[test]

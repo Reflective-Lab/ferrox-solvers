@@ -34,6 +34,11 @@ Versioning before 1.0 with the usual pre-1.0 compatibility caveats.
 - OR-Tools native dependency reconciliation now verifies the requested
   `ORTOOLS_TAG` and rebuilds ignored local vendor checkouts when the tag or
   generated CMake config is stale.
+- HiGHS native dependency reconciliation now verifies the requested
+  `HIGHS_TAG`, switches stale ignored vendor checkouts, and rebuilds against
+  the current HiGHS header layout.
+- CP-SAT and MIP suggestors now reject unknown variable, interval, and
+  objective references as `invalid` plans instead of solving weakened models.
 
 ### Fixed
 

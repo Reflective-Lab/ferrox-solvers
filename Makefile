@@ -47,18 +47,30 @@ $(ORTOOLS_BUILD)/.ferrox-$(ORTOOLS_TAG): Makefile
 	cmake --build $(ORTOOLS_BUILD) -j$(JOBS) --target ortools
 	@touch $@
 
-highs: $(HIGHS_BUILD)/lib/libhighs.dylib
+highs: $(HIGHS_BUILD)/.ferrox-$(HIGHS_TAG)
 
-$(HIGHS_BUILD)/lib/libhighs.dylib:
+$(HIGHS_BUILD)/.ferrox-$(HIGHS_TAG): Makefile
 	@if [ ! -d $(HIGHS_SRC) ]; then \
 	  git clone --depth 1 --branch $(HIGHS_TAG) \
 	    https://github.com/ERGO-Code/HiGHS $(HIGHS_SRC); \
+	elif [ ! -d $(HIGHS_SRC)/.git ]; then \
+	  echo "$(HIGHS_SRC) exists but is not a git checkout"; \
+	  exit 1; \
+	fi
+	@set -e; \
+	current_tag=$$(git -C $(HIGHS_SRC) describe --tags --exact-match 2>/dev/null || true); \
+	if [ "$$current_tag" != "$(HIGHS_TAG)" ]; then \
+	  echo "Switching HiGHS from $${current_tag:-unknown} to $(HIGHS_TAG)"; \
+	  git -C $(HIGHS_SRC) fetch --depth 1 origin tag $(HIGHS_TAG); \
+	  git -C $(HIGHS_SRC) switch --detach $(HIGHS_TAG); \
+	  rm -rf $(HIGHS_BUILD); \
 	fi
 	cmake -S $(HIGHS_SRC) -B $(HIGHS_BUILD) \
 	  -DCMAKE_BUILD_TYPE=Release \
 	  -DBUILD_SHARED_LIBS=ON \
 	  -DFAST_BUILD=ON
 	cmake --build $(HIGHS_BUILD) -j$(JOBS)
+	@touch $@
 
 clean:
 	rm -rf $(ORTOOLS_BUILD) $(HIGHS_BUILD)
