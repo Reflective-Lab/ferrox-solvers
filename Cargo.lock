@@ -162,21 +162,21 @@ dependencies = [
 
 [[package]]
 name = "converge-ferrox-highs-sys"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "converge-ferrox-ortools-sys"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "converge-ferrox-server"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "converge-ferrox-highs-sys",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "converge-ferrox-solver"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "converge-core",

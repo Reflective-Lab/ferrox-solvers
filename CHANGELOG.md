@@ -7,6 +7,8 @@ Versioning before 1.0 with the usual pre-1.0 compatibility caveats.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-14
+
 ### Added
 
 - OR-Tools SimpleMinCostFlow wrapper and `MinCostFlowSuggestor` for
