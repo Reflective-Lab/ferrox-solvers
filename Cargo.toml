@@ -45,9 +45,3 @@ must_use_candidate           = "allow"
 missing_errors_doc           = "allow"
 missing_panics_doc           = "allow"
 module_name_repetitions      = "allow"
-
-[patch.crates-io]
-converge-core = { path = "../../bedrock-platform/converge/crates/core" }
-converge-model = { path = "../../bedrock-platform/converge/crates/model" }
-converge-pack = { path = "../../bedrock-platform/converge/crates/pack" }
-converge-provider = { path = "../../bedrock-platform/converge/crates/provider" }

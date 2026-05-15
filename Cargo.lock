@@ -150,6 +150,8 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 [[package]]
 name = "converge-core"
 version = "3.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfaf3f493217aef11c7ac0f4accfe60f1bb6d875e518b859b4cbc46a90c9082e"
 dependencies = [
  "async-trait",
  "converge-pack",
@@ -217,6 +219,8 @@ dependencies = [
 [[package]]
 name = "converge-model"
 version = "3.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dad9485614497ea106299b9130eac538b997c1ee665e9cc68405f7678c67eb6"
 dependencies = [
  "converge-core",
  "converge-pack",
@@ -227,6 +231,8 @@ dependencies = [
 [[package]]
 name = "converge-pack"
 version = "3.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54991908be2931ceee38bbbe27df06c18b936830b99b5106154ce98ed5c37c0f"
 dependencies = [
  "async-trait",
  "hex",
@@ -239,6 +245,8 @@ dependencies = [
 [[package]]
 name = "converge-provider"
 version = "3.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b0aee574a11549517ad43c9cb1e7f744ee97cbaac4f4adcf9563370751242eb"
 dependencies = [
  "serde",
  "serde_json",
