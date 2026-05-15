@@ -16,9 +16,9 @@ repository = "https://github.com/Reflective-Lab/ferrox-solvers"
 
 [workspace.dependencies]
 # ferrox-internal
-ferrox-ortools-sys = { path = "crates/ortools-sys", package = "converge-ferrox-ortools-sys", version = "0.6.0" }
-ferrox-highs-sys   = { path = "crates/highs-sys",   package = "converge-ferrox-highs-sys",   version = "0.6.0" }
-ferrox             = { path = "crates/ferrox",      package = "converge-ferrox-solver",     version = "0.6.0" }
+ferrox-ortools-sys = { path = "crates/ortools-sys", package = "converge-ferrox-ortools-sys", version = "0.7.0" }
+ferrox-highs-sys   = { path = "crates/highs-sys",   package = "converge-ferrox-highs-sys",   version = "0.7.0" }
+ferrox             = { path = "crates/ferrox",      package = "converge-ferrox-solver",     version = "0.7.0" }
 
 # converge
 converge-pack = "3.9.0"
