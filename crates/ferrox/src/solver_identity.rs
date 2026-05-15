@@ -1,4 +1,10 @@
-use converge_pack::{ExecutionIdentity, ExecutionProducerIdentity, NativeExecutionIdentity};
+use converge_pack::ExecutionIdentity;
+// `ExecutionProducerIdentity` + `NativeExecutionIdentity` are only consumed
+// by the native-solver builders (`cp_sat_*`, `glop_*`, `min_cost_flow_*`,
+// `highs_*`), all of which are feature-gated. Match the same gating on the
+// imports so a feature-off build doesn't drop into `-D unused-imports`.
+#[cfg(any(feature = "ortools", feature = "highs"))]
+use converge_pack::{ExecutionProducerIdentity, NativeExecutionIdentity};
 
 pub fn unspecified_solver_identity() -> ExecutionIdentity {
     ExecutionIdentity::unspecified(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))

@@ -127,6 +127,11 @@ fn git_head(source_dir: &std::path::Path) -> Option<String> {
     (!commit.is_empty()).then(|| commit.to_string())
 }
 
+// Only the macOS branch consumes `lib_dir` (to walk `libortools.dylib`
+// transitive deps via `otool -L`). On Linux/Windows the parameter is
+// unused, so silence the lint on those targets specifically rather than
+// blanket-allowing on macOS where it would mask a real bug.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 fn link_ortools_dylib_dependencies(lib_dir: &std::path::Path) {
     #[cfg(target_os = "macos")]
     {
