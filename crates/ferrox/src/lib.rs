@@ -25,4 +25,4 @@ pub mod vrptw;
 
 pub use converge_pack::ExecutionIdentity;
 pub use error::{FerroxError, Result};
-pub use provenance::{FERROX_PROVENANCE, ProvenanceSource, UnknownProvenanceSource};
+pub use provenance::{FERROX_PROVENANCE, Ferrox};

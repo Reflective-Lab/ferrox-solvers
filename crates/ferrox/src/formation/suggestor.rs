@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use converge_model::formation::{FormationPlan, FormationRequest, ProfileSnapshot, RoleAssignment};
 use converge_pack::{
-    AgentEffect, Context, ContextKey, ExecutionIdentity, ExecutionIdentityEvidence, Suggestor,
+    AgentEffect, Context, ContextKey, ExecutionIdentity, ExecutionIdentityEvidence,
+    ProvenanceSource, Suggestor,
 };
 use ferrox_ortools_sys::safe::CpModel;
 use tracing::warn;
