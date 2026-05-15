@@ -269,7 +269,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
         tasks_scheduled: scheduled,
         makespan_min: makespan,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: scheduling_cpsat_identity(req),
+        execution_identity: scheduling_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds: elapsed,
     }
@@ -321,17 +321,29 @@ fn empty_plan(req: &SchedulingRequest, status: &str, wall_time_seconds: f64) -> 
         tasks_scheduled: 0,
         makespan_min: 0,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: scheduling_cpsat_identity(req),
+        execution_identity: scheduling_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds,
     }
 }
 
+/// Typed runtime config for a CP-SAT scheduling solve. JSON-serialized
+/// into `ExecutionIdentity.runtime_config` per the workspace
+/// `Runtime Config Encoding` standard.
+#[derive(serde::Serialize)]
+struct CpSatSchedulingRuntimeConfig {
+    time_limit_seconds: f64,
+    search_workers: &'static str,
+    objective: &'static str,
+}
+
 fn scheduling_cpsat_identity(req: &SchedulingRequest) -> ExecutionIdentity {
-    cp_sat_solver_identity(format!(
-        "time_limit_seconds={}; search_workers=hardware_concurrency; objective=maximize_tasks_scheduled",
-        req.time_limit_seconds
-    ))
+    let config = CpSatSchedulingRuntimeConfig {
+        time_limit_seconds: req.time_limit_seconds,
+        search_workers: "hardware_concurrency",
+        objective: "maximize_tasks_scheduled",
+    };
+    cp_sat_solver_identity(ExecutionIdentity::runtime_config_from_typed(&config))
 }
 
 #[cfg(test)]
@@ -387,9 +399,9 @@ mod tests {
         );
         let plan = solve_cpsat(&r);
         assert_eq!(plan.status, "optimal");
-        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .is_some_and(|native| native.backend.contains("OR-Tools"))

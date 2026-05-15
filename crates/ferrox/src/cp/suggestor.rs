@@ -270,7 +270,7 @@ fn solve_cp_checked(req: &CpSatRequest) -> Result<CpSatPlan, OrtoolsError> {
         objective_value,
         wall_time_seconds: solution.wall_time(),
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: cp_identity(req),
+        execution_identity: cp_identity(req),
     })
 }
 
@@ -290,7 +290,7 @@ fn empty_plan(req: &CpSatRequest, status: &'static str) -> CpSatPlan {
         objective_value: None,
         wall_time_seconds: 0.0,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: cp_identity(req),
+        execution_identity: cp_identity(req),
     }
 }
 
@@ -668,9 +668,9 @@ mod tests {
         assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
         assert_eq!(plan.assignments.len(), 4);
         assert_eq!(plan.solver, "cp-sat-v9.15");
-        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .is_some_and(|native| native.backend.contains("OR-Tools"))

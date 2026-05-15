@@ -166,7 +166,7 @@ pub struct CpSatPlan {
     pub objective_value: Option<i64>,
     pub wall_time_seconds: f64,
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
 }
 
 impl FactPayload for CpSatPlan {

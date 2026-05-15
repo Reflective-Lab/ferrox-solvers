@@ -208,7 +208,7 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
         objective_value,
         mip_gap,
         solver: "highs-v1.14.0".to_string(),
-        solver_identity: mip_identity(req),
+        execution_identity: mip_identity(req),
     }
 }
 
@@ -220,7 +220,7 @@ fn invalid_plan(req: &MipRequest) -> MipPlan {
         objective_value: 0.0,
         mip_gap: f64::INFINITY,
         solver: "highs-v1.14.0".to_string(),
-        solver_identity: mip_identity(req),
+        execution_identity: mip_identity(req),
     }
 }
 
@@ -233,7 +233,7 @@ fn solver_error_plan(req: &MipRequest, err: &HighsError) -> MipPlan {
         objective_value: 0.0,
         mip_gap: f64::INFINITY,
         solver: "highs-v1.14.0".to_string(),
-        solver_identity: mip_identity(req),
+        execution_identity: mip_identity(req),
     }
 }
 
@@ -386,9 +386,9 @@ mod tests {
         let req = knapsack(4, 10.0, &[2.0, 3.0, 4.0, 5.0], &[3.0, 4.0, 5.0, 6.0]);
         let plan = solve_mip(&req);
         assert_eq!(plan.status, "optimal");
-        assert_eq!(plan.solver_identity.backend, "highs-v1.14.0");
+        assert_eq!(plan.execution_identity.backend, "highs-v1.14.0");
         assert_eq!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .map(|native| native.backend.as_str()),

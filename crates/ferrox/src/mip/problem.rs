@@ -73,7 +73,7 @@ pub struct MipPlan {
     pub objective_value: f64,
     pub mip_gap: f64,
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
 }
 
 impl FactPayload for MipPlan {

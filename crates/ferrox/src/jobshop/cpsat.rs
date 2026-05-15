@@ -227,7 +227,7 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
         makespan,
         lower_bound,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: jobshop_cpsat_identity(req),
+        execution_identity: jobshop_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds: elapsed,
     }
@@ -277,7 +277,7 @@ fn empty_plan(req: &JobShopRequest, status: &str, wall_time_seconds: f64) -> Job
         makespan: 0,
         lower_bound: None,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: jobshop_cpsat_identity(req),
+        execution_identity: jobshop_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds,
     }
@@ -334,9 +334,9 @@ mod tests {
         );
         let plan = solve_cpsat_jsp(&r);
         assert_eq!(plan.status, "optimal");
-        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .is_some_and(|native| native.backend.contains("OR-Tools"))

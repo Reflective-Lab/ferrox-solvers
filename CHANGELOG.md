@@ -7,6 +7,22 @@ Versioning before 1.0 with the usual pre-1.0 compatibility caveats.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-15
+
+### Changed
+- **BREAKING**: `*Plan.solver_identity` field renamed to `execution_identity`
+  across all Ferrox plan types (`SchedulingPlan`, `LpPlan`, `MipPlan`,
+  `CpSatPlan`, `JobshopPlan`, `VrptwPlan`, `NetworkFlowPlan`). Aligns with
+  the workspace convention. The proto wire-format field name is unchanged.
+- Runtime configs for CP-SAT scheduling and other call sites now serialize
+  through `ExecutionIdentity::runtime_config_from_typed` per the workspace
+  `Runtime Config Encoding` standard. Free-form `"k=v; k=v"` strings replaced
+  with typed JSON.
+
+### Dependencies
+- Bumped `converge-pack`, `converge-core`, `converge-model`, `converge-provider`
+  floor to 3.9.0.
+
 ## [0.5.1] - 2026-05-14
 
 ### Added

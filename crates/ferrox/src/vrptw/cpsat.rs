@@ -358,7 +358,7 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
         total_distance,
         return_time,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: vrptw_cpsat_identity(req),
+        execution_identity: vrptw_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds: elapsed,
     }
@@ -431,7 +431,7 @@ fn empty_plan(req: &VrptwRequest, status: &str, wall_time_seconds: f64) -> Vrptw
         total_distance: 0.0,
         return_time: 0,
         solver: "cp-sat-v9.15".to_string(),
-        solver_identity: vrptw_cpsat_identity(req),
+        execution_identity: vrptw_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds,
     }
@@ -495,9 +495,9 @@ mod tests {
         );
         let plan = solve_cpsat_vrptw(&r);
         assert_eq!(plan.status, "optimal");
-        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .is_some_and(|native| native.backend.contains("OR-Tools"))

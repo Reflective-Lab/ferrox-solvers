@@ -63,7 +63,7 @@ pub struct LpPlan {
     pub values: Vec<(String, f64)>,
     pub objective_value: f64,
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
 }
 
 impl FactPayload for LpPlan {

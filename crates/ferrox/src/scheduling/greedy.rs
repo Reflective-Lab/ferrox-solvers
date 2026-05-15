@@ -150,7 +150,7 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
         tasks_scheduled: scheduled,
         makespan_min: makespan,
         solver: "greedy-edf".to_string(),
-        solver_identity: non_native_solver_identity(
+        execution_identity: non_native_solver_identity(
             "greedy-edf",
             "algorithm=edf_earliest_available",
         ),

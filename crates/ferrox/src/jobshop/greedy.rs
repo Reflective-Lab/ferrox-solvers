@@ -204,7 +204,7 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
         makespan,
         lower_bound: None,
         solver: "greedy-spt".to_string(),
-        solver_identity: non_native_solver_identity(
+        execution_identity: non_native_solver_identity(
             "greedy-spt",
             "algorithm=shortest_processing_time",
         ),

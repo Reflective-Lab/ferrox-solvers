@@ -174,7 +174,7 @@ pub fn solve_nn(req: &VrptwRequest) -> VrptwPlan {
         total_distance: total_dist,
         return_time,
         solver: "nearest-neighbour".to_string(),
-        solver_identity: non_native_solver_identity(
+        execution_identity: non_native_solver_identity(
             "nearest-neighbour",
             "algorithm=nearest_neighbour",
         ),

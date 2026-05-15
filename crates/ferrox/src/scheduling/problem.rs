@@ -75,7 +75,7 @@ pub struct SchedulingPlan {
     pub makespan_min: i64,
     /// Short identifier for the algorithm that produced this plan.
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
     /// `"optimal"`, `"feasible"`, `"infeasible"`, or `"error"`.
     pub status: String,
     pub wall_time_seconds: f64,
@@ -110,7 +110,7 @@ mod tests {
             tasks_scheduled,
             makespan_min: 0,
             solver: "x".into(),
-            solver_identity: non_native_solver_identity("x", "test"),
+            execution_identity: non_native_solver_identity("x", "test"),
             status: "feasible".into(),
             wall_time_seconds: 0.0,
         }

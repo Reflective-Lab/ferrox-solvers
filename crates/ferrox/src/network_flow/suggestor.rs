@@ -175,7 +175,7 @@ fn solve_min_cost_flow_checked(
         fulfilled_flow,
         fulfillment_ratio,
         solver: "simple-min-cost-flow-v9.15".to_string(),
-        solver_identity: flow_identity(req, reserve_nodes, reserve_arcs),
+        execution_identity: flow_identity(req, reserve_nodes, reserve_arcs),
     })
 }
 
@@ -204,7 +204,7 @@ fn empty_plan(req: &MinCostFlowRequest, status: &'static str) -> MinCostFlowPlan
         fulfilled_flow: 0,
         fulfillment_ratio: flow_ratio(0, expected_flow),
         solver: "simple-min-cost-flow-v9.15".to_string(),
-        solver_identity: flow_identity(req, reserve_nodes(req), reserve_arcs(req)),
+        execution_identity: flow_identity(req, reserve_nodes(req), reserve_arcs(req)),
     }
 }
 
@@ -334,9 +334,12 @@ mod tests {
         let flows: Vec<_> = plan.arcs.iter().map(|arc| arc.flow).collect();
         assert_eq!(flows, vec![3, 2, 3, 2]);
         assert_eq!(plan.solver, "simple-min-cost-flow-v9.15");
-        assert_eq!(plan.solver_identity.backend, "simple-min-cost-flow-v9.15");
+        assert_eq!(
+            plan.execution_identity.backend,
+            "simple-min-cost-flow-v9.15"
+        );
         assert!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .is_some_and(|native| native.backend.contains("OR-Tools"))

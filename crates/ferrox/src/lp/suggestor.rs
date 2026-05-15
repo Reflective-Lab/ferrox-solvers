@@ -177,7 +177,7 @@ fn solve_lp_checked(req: &LpRequest) -> Result<LpPlan, OrtoolsError> {
         values,
         objective_value,
         solver: "glop-v9.15".to_string(),
-        solver_identity: lp_identity(req),
+        execution_identity: lp_identity(req),
     })
 }
 
@@ -256,7 +256,7 @@ fn empty_plan(req: &LpRequest, status: &'static str) -> LpPlan {
         values: Vec::new(),
         objective_value: 0.0,
         solver: "glop-v9.15".to_string(),
-        solver_identity: lp_identity(req),
+        execution_identity: lp_identity(req),
     }
 }
 
@@ -323,9 +323,9 @@ mod tests {
         assert_eq!(plan.status, "optimal");
         assert!((plan.objective_value - 14.0 / 5.0).abs() < 1e-6);
         assert_eq!(plan.solver, "glop-v9.15");
-        assert_eq!(plan.solver_identity.backend, "glop-v9.15");
+        assert_eq!(plan.execution_identity.backend, "glop-v9.15");
         assert!(
-            plan.solver_identity
+            plan.execution_identity
                 .native_identity
                 .as_ref()
                 .is_some_and(|native| native.backend.contains("OR-Tools"))

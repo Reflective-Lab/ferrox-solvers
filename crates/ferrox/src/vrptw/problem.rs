@@ -92,7 +92,7 @@ pub struct VrptwPlan {
     /// Time the vehicle returns to depot.
     pub return_time: i64,
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
     pub status: String,
     pub wall_time_seconds: f64,
 }
@@ -157,7 +157,7 @@ mod tests {
             total_distance: 0.0,
             return_time: 0,
             solver: "x".into(),
-            solver_identity: non_native_solver_identity("x", "test"),
+            execution_identity: non_native_solver_identity("x", "test"),
             status: "feasible".into(),
             wall_time_seconds: 0.0,
         };

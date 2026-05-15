@@ -73,7 +73,7 @@ pub struct JobShopPlan {
     /// Proven lower bound (available when status is `"optimal"`).
     pub lower_bound: Option<i64>,
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
     /// `"optimal"`, `"feasible"`, or `"error"`.
     pub status: String,
     pub wall_time_seconds: f64,

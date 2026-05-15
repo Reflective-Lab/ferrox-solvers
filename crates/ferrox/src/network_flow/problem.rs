@@ -69,7 +69,7 @@ pub struct MinCostFlowPlan {
     pub fulfilled_flow: i64,
     pub fulfillment_ratio: f64,
     pub solver: String,
-    pub solver_identity: ExecutionIdentity,
+    pub execution_identity: ExecutionIdentity,
 }
 
 impl FactPayload for MinCostFlowPlan {

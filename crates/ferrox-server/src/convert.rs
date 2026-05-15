@@ -226,7 +226,7 @@ pub fn cp_resp_to_proto(p: CpSatPlan) -> p::SolveCpResponse {
         objective_value: p.objective_value,
         wall_time_seconds: p.wall_time_seconds,
         solver: p.solver,
-        solver_identity: Some(solver_identity_to_proto(p.solver_identity)),
+        solver_identity: Some(solver_identity_to_proto(p.execution_identity)),
     }
 }
 
@@ -291,7 +291,7 @@ pub fn lp_resp_to_proto(p: LpPlan) -> p::SolveLpResponse {
             .collect(),
         objective_value: p.objective_value,
         solver: p.solver,
-        solver_identity: Some(solver_identity_to_proto(p.solver_identity)),
+        solver_identity: Some(solver_identity_to_proto(p.execution_identity)),
     }
 }
 
@@ -375,7 +375,7 @@ pub fn mip_resp_to_proto(p: MipPlan) -> p::SolveMipResponse {
         objective_value: p.objective_value,
         mip_gap: p.mip_gap,
         solver: p.solver,
-        solver_identity: Some(solver_identity_to_proto(p.solver_identity)),
+        solver_identity: Some(solver_identity_to_proto(p.execution_identity)),
     }
 }
 
@@ -677,7 +677,7 @@ mod tests {
             objective_value: Some(10),
             wall_time_seconds: 0.5,
             solver: "cp-sat-v9.15".into(),
-            solver_identity: ferrox::solver_identity::non_native_solver_identity(
+            execution_identity: ferrox::solver_identity::non_native_solver_identity(
                 "cp-sat-v9.15",
                 "test",
             ),
@@ -750,7 +750,7 @@ mod tests {
             values: vec![("x".into(), 1.5)],
             objective_value: 3.0,
             solver: "glop".into(),
-            solver_identity: ferrox::solver_identity::non_native_solver_identity("glop", "test"),
+            execution_identity: ferrox::solver_identity::non_native_solver_identity("glop", "test"),
         };
         let resp = lp_resp_to_proto(plan);
         assert_eq!(resp.values.len(), 1);
@@ -855,7 +855,9 @@ mod tests {
             objective_value: 7.0,
             mip_gap: 0.05,
             solver: "highs".into(),
-            solver_identity: ferrox::solver_identity::non_native_solver_identity("highs", "test"),
+            execution_identity: ferrox::solver_identity::non_native_solver_identity(
+                "highs", "test",
+            ),
         };
         let resp = mip_resp_to_proto(plan);
         assert_eq!(resp.values.len(), 2);
