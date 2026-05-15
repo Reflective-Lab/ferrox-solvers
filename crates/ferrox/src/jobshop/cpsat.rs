@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::CpModel;
 use std::time::Instant;
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::cp_sat_solver_identity;
 
 use super::greedy::REQUEST_PREFIX;
 use super::problem::{JobShopPlan, JobShopRequest, ScheduledOp};
@@ -73,9 +74,9 @@ impl Suggestor for CpSatJobShopSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<JobShopRequest>(fact.content()) {
+            match fact.require_payload::<JobShopRequest>() {
                 Ok(req) => {
-                    let plan = solve_cpsat_jsp(&req);
+                    let plan = solve_cpsat_jsp(req);
                     let confidence = match plan.status.as_str() {
                         "optimal" => 1.0,
                         "feasible" => 0.85,
@@ -86,13 +87,13 @@ impl Suggestor for CpSatJobShopSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed jspbench-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected jspbench-request payload");
                 }
             }
         }
@@ -120,6 +121,11 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 
 pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
     let t0 = Instant::now();
+    if let Err(reason) = validate_jobshop_request(req) {
+        warn!(request_id = %req.id, reason = %reason, "invalid jspbench-request");
+        return empty_plan(req, "invalid", t0.elapsed().as_secs_f64());
+    }
+
     let horizon = req.horizon();
     let mut model = CpModel::new();
 
@@ -189,15 +195,7 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
     };
 
     if !solution.status().is_success() {
-        return JobShopPlan {
-            request_id: req.id.clone(),
-            schedule: Vec::new(),
-            makespan: 0,
-            lower_bound: None,
-            solver: "cp-sat-v9.15".to_string(),
-            status: status.to_string(),
-            wall_time_seconds: elapsed,
-        };
+        return empty_plan(req, status, elapsed);
     }
 
     let makespan = solution.value(cmax);
@@ -230,9 +228,67 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
         makespan,
         lower_bound,
         solver: "cp-sat-v9.15".to_string(),
+        solver_identity: jobshop_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds: elapsed,
     }
+}
+
+fn validate_jobshop_request(req: &JobShopRequest) -> Result<(), String> {
+    if req.id.trim().is_empty() {
+        return Err("request id must not be empty".to_string());
+    }
+    if req.id.contains('\0') {
+        return Err("request id contains an interior NUL byte".to_string());
+    }
+    if !req.time_limit_seconds.is_finite() || req.time_limit_seconds <= 0.0 {
+        return Err("time_limit_seconds must be finite and positive".to_string());
+    }
+
+    let mut horizon = 0_i64;
+    for job in &req.jobs {
+        if job.operations.is_empty() {
+            return Err(format!("job '{}' has no operations", job.id));
+        }
+        for op in &job.operations {
+            if op.machine_id >= req.num_machines {
+                return Err(format!(
+                    "operation references machine {} outside 0..{}",
+                    op.machine_id, req.num_machines
+                ));
+            }
+            if op.duration < 0 {
+                return Err(format!(
+                    "operation on machine {} has negative duration",
+                    op.machine_id
+                ));
+            }
+            horizon = horizon
+                .checked_add(op.duration)
+                .ok_or_else(|| "job-shop horizon overflows i64".to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn empty_plan(req: &JobShopRequest, status: &str, wall_time_seconds: f64) -> JobShopPlan {
+    JobShopPlan {
+        request_id: req.id.clone(),
+        schedule: Vec::new(),
+        makespan: 0,
+        lower_bound: None,
+        solver: "cp-sat-v9.15".to_string(),
+        solver_identity: jobshop_cpsat_identity(req),
+        status: status.to_string(),
+        wall_time_seconds,
+    }
+}
+
+fn jobshop_cpsat_identity(req: &JobShopRequest) -> ExecutionIdentity {
+    cp_sat_solver_identity(format!(
+        "time_limit_seconds={}; search_workers=hardware_concurrency; objective=minimize_makespan",
+        req.time_limit_seconds
+    ))
 }
 
 #[cfg(test)]
@@ -241,6 +297,7 @@ mod tests {
     use super::*;
     use crate::jobshop::problem::{Job, Operation};
     use crate::test_support::MockContext;
+    use converge_pack::TextPayload;
 
     fn op(machine: usize, dur: i64) -> Operation {
         Operation {
@@ -278,10 +335,25 @@ mod tests {
         );
         let plan = solve_cpsat_jsp(&r);
         assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
         assert!(plan.lower_bound.is_some());
         // Optimal makespan for this 2x2 instance is 6.
         assert_eq!(plan.makespan, 6);
         assert_eq!(plan.schedule.len(), 4);
+    }
+
+    #[test]
+    fn rejects_invalid_operation_without_panic() {
+        let r = req(vec![job(0, vec![op(2, 3)])], 1, 5.0);
+        let plan = solve_cpsat_jsp(&r);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.schedule.is_empty());
     }
 
     #[test]
@@ -300,8 +372,7 @@ mod tests {
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let r = req(vec![job(0, vec![op(0, 3)])], 1, 1.0);
-        let body = serde_json::to_string(&r).unwrap();
-        let ctx = MockContext::empty().with_seed("jspbench-request:j", &body);
+        let ctx = MockContext::empty().with_seed("jspbench-request:j", r);
         let s = CpSatJobShopSuggestor;
         assert_eq!(s.name(), "CpSatJobShopSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -314,10 +385,9 @@ mod tests {
     #[tokio::test]
     async fn suggestor_skips_when_plan_present() {
         let r = req(vec![job(0, vec![op(0, 3)])], 1, 1.0);
-        let body = serde_json::to_string(&r).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("jspbench-request:j", &body)
-            .with_strategy("jspbench-plan-cpsat:j", "{}");
+            .with_seed("jspbench-request:j", r)
+            .with_strategy("jspbench-plan-cpsat:j", TextPayload::new("existing"));
         let s = CpSatJobShopSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -326,7 +396,10 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("jspbench-request:bad", "not json");
+        let ctx = MockContext::empty().with_seed(
+            "jspbench-request:bad",
+            TextPayload::new("not a jobshop request"),
+        );
         let s = CpSatJobShopSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

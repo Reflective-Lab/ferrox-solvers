@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
-use ferrox_ortools_sys::safe::CpModel;
+use ferrox_ortools_sys::safe::{CpModel, OrtoolsError};
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::cp_sat_solver_identity;
 
 use super::problem::{ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpTerm};
 
@@ -54,9 +55,9 @@ impl Suggestor for CpSatSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<CpSatRequest>(fact.content()) {
+            match fact.require_payload::<CpSatRequest>() {
                 Ok(req) => {
-                    let plan = solve_cp(&req);
+                    let plan = solve_cp(req);
                     let confidence = match plan.status.as_str() {
                         "optimal" => 1.0,
                         "feasible" => 0.7,
@@ -67,13 +68,13 @@ impl Suggestor for CpSatSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{}", plan.request_id),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed cpsat-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected cpsat-request payload");
                 }
             }
         }
@@ -104,181 +105,138 @@ pub fn solve_cp(req: &CpSatRequest) -> CpSatPlan {
         return invalid_plan(req);
     }
 
-    let mut model = CpModel::new();
+    match solve_cp_checked(req) {
+        Ok(plan) => plan,
+        Err(OrtoolsError::InvalidInput(reason)) => {
+            warn!(request_id = %req.id, reason = %reason, "invalid cpsat-request");
+            invalid_plan(req)
+        }
+        Err(error) => {
+            warn!(request_id = %req.id, error = %error, "CP-SAT native solve failed");
+            error_plan(req)
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn solve_cp_checked(req: &CpSatRequest) -> Result<CpSatPlan, OrtoolsError> {
+    let mut model = CpModel::try_new()?;
     let mut name_to_idx: HashMap<String, i32> = HashMap::new();
     let mut bool_name_to_idx: HashMap<String, i32> = HashMap::new();
     let mut interval_name_to_idx: HashMap<String, i32> = HashMap::new();
 
     for var in &req.variables {
         let idx = if var.is_bool {
-            let i = model.new_bool_var(&var.name);
+            let i = model.try_new_bool_var(&var.name)?;
             bool_name_to_idx.insert(var.name.clone(), i);
             i
         } else {
-            model.new_int_var(var.lb, var.ub, &var.name)
+            model.try_new_int_var(var.lb, var.ub, &var.name)?
         };
         name_to_idx.insert(var.name.clone(), idx);
     }
 
     for ivd in &req.interval_vars {
-        if let (Some(&s), Some(&e)) = (
-            name_to_idx.get(&ivd.start_var),
-            name_to_idx.get(&ivd.end_var),
-        ) {
-            let idx = model.new_fixed_interval_var(s, ivd.duration, e, &ivd.name);
-            interval_name_to_idx.insert(ivd.name.clone(), idx);
-        } else {
-            warn!(name = %ivd.name, "interval_var references unknown start/end variable");
-        }
+        let s = cp_var_index(&name_to_idx, &ivd.start_var)?;
+        let e = cp_var_index(&name_to_idx, &ivd.end_var)?;
+        let idx = model.try_new_fixed_interval_var(s, ivd.duration, e, &ivd.name)?;
+        interval_name_to_idx.insert(ivd.name.clone(), idx);
     }
 
     for ovd in &req.optional_interval_vars {
-        match (
-            name_to_idx.get(&ovd.start_var),
-            name_to_idx.get(&ovd.end_var),
-            bool_name_to_idx.get(&ovd.lit_var),
-        ) {
-            (Some(&s), Some(&e), Some(&lit)) => {
-                let idx = model.new_optional_interval_var(s, ovd.duration, e, lit, &ovd.name);
-                interval_name_to_idx.insert(ovd.name.clone(), idx);
-            }
-            _ => {
-                warn!(name = %ovd.name, "optional_interval_var references unknown variable(s)");
-            }
-        }
+        let s = cp_var_index(&name_to_idx, &ovd.start_var)?;
+        let e = cp_var_index(&name_to_idx, &ovd.end_var)?;
+        let lit = cp_var_index(&bool_name_to_idx, &ovd.lit_var)?;
+        let idx = model.try_new_optional_interval_var(s, ovd.duration, e, lit, &ovd.name)?;
+        interval_name_to_idx.insert(ovd.name.clone(), idx);
     }
 
     for constraint in &req.constraints {
         match constraint {
             ConstraintKind::LinearLe { terms, rhs } => {
-                let (vars, coeffs) = terms_to_vecs(terms, &name_to_idx);
-                model.add_linear_le(&vars, &coeffs, *rhs);
+                let (vars, coeffs) = terms_to_vecs(terms, &name_to_idx)?;
+                model.try_add_linear_le(&vars, &coeffs, *rhs)?;
             }
             ConstraintKind::LinearGe { terms, rhs } => {
-                let (vars, coeffs) = terms_to_vecs(terms, &name_to_idx);
-                model.add_linear_ge(&vars, &coeffs, *rhs);
+                let (vars, coeffs) = terms_to_vecs(terms, &name_to_idx)?;
+                model.try_add_linear_ge(&vars, &coeffs, *rhs)?;
             }
             ConstraintKind::LinearEq { terms, rhs } => {
-                let (vars, coeffs) = terms_to_vecs(terms, &name_to_idx);
-                model.add_linear_eq(&vars, &coeffs, *rhs);
+                let (vars, coeffs) = terms_to_vecs(terms, &name_to_idx)?;
+                model.try_add_linear_eq(&vars, &coeffs, *rhs)?;
             }
             ConstraintKind::AllDifferent { vars } => {
-                let idxs: Vec<i32> = vars
-                    .iter()
-                    .filter_map(|v| name_to_idx.get(v).copied())
-                    .collect();
-                model.add_all_different(&idxs);
+                let idxs = vars_to_idxs(vars, &name_to_idx)?;
+                model.try_add_all_different(&idxs)?;
             }
             ConstraintKind::BoolOr { literals } => {
-                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "BoolOr") {
-                    model.add_bool_or(&lits);
-                }
+                let lits = bool_literals_to_refs(literals, &bool_name_to_idx)?;
+                model.try_add_bool_or(&lits)?;
             }
             ConstraintKind::BoolAnd { literals } => {
-                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "BoolAnd") {
-                    model.add_bool_and(&lits);
-                }
+                let lits = bool_literals_to_refs(literals, &bool_name_to_idx)?;
+                model.try_add_bool_and(&lits)?;
             }
             ConstraintKind::BoolXor { literals } => {
-                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "BoolXor") {
-                    model.add_bool_xor(&lits);
-                }
+                let lits = bool_literals_to_refs(literals, &bool_name_to_idx)?;
+                model.try_add_bool_xor(&lits)?;
             }
             ConstraintKind::Implication {
                 antecedent,
                 consequent,
             } => {
-                if let (Some(lhs), Some(rhs)) = (
-                    bool_literal_to_ref(antecedent, &bool_name_to_idx, "Implication"),
-                    bool_literal_to_ref(consequent, &bool_name_to_idx, "Implication"),
-                ) {
-                    model.add_implication(lhs, rhs);
-                } else {
-                    warn!("Implication references unknown bool variable");
-                }
+                let lhs = bool_literal_to_ref(antecedent, &bool_name_to_idx)?;
+                let rhs = bool_literal_to_ref(consequent, &bool_name_to_idx)?;
+                model.try_add_implication(lhs, rhs)?;
             }
             ConstraintKind::AtMostOne { literals } => {
-                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "AtMostOne")
-                {
-                    model.add_at_most_one(&lits);
-                }
+                let lits = bool_literals_to_refs(literals, &bool_name_to_idx)?;
+                model.try_add_at_most_one(&lits)?;
             }
             ConstraintKind::ExactlyOne { literals } => {
-                if let Some(lits) = bool_literals_to_refs(literals, &bool_name_to_idx, "ExactlyOne")
-                {
-                    model.add_exactly_one(&lits);
-                }
+                let lits = bool_literals_to_refs(literals, &bool_name_to_idx)?;
+                model.try_add_exactly_one(&lits)?;
             }
             ConstraintKind::AllowedAssignments { vars, tuples } => {
-                if tuples.iter().all(|tuple| tuple.len() == vars.len()) {
-                    if let Some(idxs) = vars_to_idxs(vars, &name_to_idx, "AllowedAssignments") {
-                        model.add_allowed_assignments(&idxs, tuples);
-                    }
-                } else {
-                    warn!("AllowedAssignments tuple arity does not match vars");
-                }
+                let idxs = vars_to_idxs(vars, &name_to_idx)?;
+                model.try_add_allowed_assignments(&idxs, tuples)?;
             }
             ConstraintKind::NoOverlap { intervals } => {
-                let idxs: Vec<i32> = intervals
-                    .iter()
-                    .filter_map(|n| interval_name_to_idx.get(n).copied())
-                    .collect();
-                model.add_no_overlap(&idxs);
+                let idxs = vars_to_idxs(intervals, &interval_name_to_idx)?;
+                model.try_add_no_overlap(&idxs)?;
             }
             ConstraintKind::Cumulative { demands, capacity } => {
                 let mut interval_idxs = Vec::with_capacity(demands.len());
                 let mut demand_values = Vec::with_capacity(demands.len());
-                let mut missing = false;
                 for demand in demands {
-                    if let Some(&idx) = interval_name_to_idx.get(&demand.interval) {
-                        interval_idxs.push(idx);
-                        demand_values.push(demand.demand);
-                    } else {
-                        missing = true;
-                        warn!(
-                            interval = %demand.interval,
-                            "Cumulative references unknown interval"
-                        );
-                    }
+                    interval_idxs.push(cp_var_index(&interval_name_to_idx, &demand.interval)?);
+                    demand_values.push(demand.demand);
                 }
-                if !missing {
-                    model.add_cumulative(&interval_idxs, &demand_values, *capacity);
-                }
+                model.try_add_cumulative(&interval_idxs, &demand_values, *capacity)?;
             }
             ConstraintKind::NoOverlap2D { rectangles } => {
                 let mut x_intervals = Vec::with_capacity(rectangles.len());
                 let mut y_intervals = Vec::with_capacity(rectangles.len());
-                let mut missing = false;
                 for rectangle in rectangles {
-                    if let (Some(&x), Some(&y)) = (
-                        interval_name_to_idx.get(&rectangle.x_interval),
-                        interval_name_to_idx.get(&rectangle.y_interval),
-                    ) {
-                        x_intervals.push(x);
-                        y_intervals.push(y);
-                    } else {
-                        missing = true;
-                        warn!("NoOverlap2D references unknown interval");
-                    }
+                    x_intervals.push(cp_var_index(&interval_name_to_idx, &rectangle.x_interval)?);
+                    y_intervals.push(cp_var_index(&interval_name_to_idx, &rectangle.y_interval)?);
                 }
-                if !missing {
-                    model.add_no_overlap_2d(&x_intervals, &y_intervals);
-                }
+                model.try_add_no_overlap_2d(&x_intervals, &y_intervals)?;
             }
         }
     }
 
     if let Some(obj_terms) = &req.objective_terms {
-        let (vars, coeffs) = terms_to_vecs(obj_terms, &name_to_idx);
+        let (vars, coeffs) = terms_to_vecs(obj_terms, &name_to_idx)?;
         if req.minimize {
-            model.minimize(&vars, &coeffs);
+            model.try_minimize(&vars, &coeffs)?;
         } else {
-            model.maximize(&vars, &coeffs);
+            model.try_maximize(&vars, &coeffs)?;
         }
     }
 
     let time_limit = req.time_limit_seconds.unwrap_or(60.0);
-    let solution = model.solve(time_limit);
+    let solution = model.try_solve(time_limit)?;
 
     let status = match solution.status() {
         OrtoolsStatus::Optimal => "optimal",
@@ -291,44 +249,67 @@ pub fn solve_cp(req: &CpSatRequest) -> CpSatPlan {
     let assignments = if solution.status().is_success() {
         req.variables
             .iter()
-            .filter_map(|v| {
-                name_to_idx
-                    .get(&v.name)
-                    .map(|&idx| (v.name.clone(), solution.value(idx)))
+            .map(|v| {
+                let idx = cp_var_index(&name_to_idx, &v.name)?;
+                Ok((v.name.clone(), solution.try_value(idx)?))
             })
-            .collect()
+            .collect::<Result<Vec<_>, OrtoolsError>>()?
     } else {
         vec![]
     };
 
     let objective_value = if solution.status().is_success() && req.objective_terms.is_some() {
-        Some(solution.objective_value())
+        Some(solution.try_objective_value()?)
     } else {
         None
     };
 
-    CpSatPlan {
+    Ok(CpSatPlan {
         request_id: req.id.clone(),
         status: status.to_string(),
         assignments,
         objective_value,
         wall_time_seconds: solution.wall_time(),
         solver: "cp-sat-v9.15".to_string(),
-    }
+        solver_identity: cp_identity(req),
+    })
 }
 
 fn invalid_plan(req: &CpSatRequest) -> CpSatPlan {
+    empty_plan(req, "invalid")
+}
+
+fn error_plan(req: &CpSatRequest) -> CpSatPlan {
+    empty_plan(req, "error")
+}
+
+fn empty_plan(req: &CpSatRequest, status: &'static str) -> CpSatPlan {
     CpSatPlan {
         request_id: req.id.clone(),
-        status: "invalid".to_string(),
+        status: status.to_string(),
         assignments: Vec::new(),
         objective_value: None,
         wall_time_seconds: 0.0,
         solver: "cp-sat-v9.15".to_string(),
+        solver_identity: cp_identity(req),
     }
 }
 
+fn cp_identity(req: &CpSatRequest) -> ExecutionIdentity {
+    cp_sat_solver_identity(format!(
+        "time_limit_seconds={}; search_workers=hardware_concurrency; minimize={}",
+        req.time_limit_seconds.unwrap_or(60.0),
+        req.minimize
+    ))
+}
+
 fn validate_cp_request(req: &CpSatRequest) -> Result<(), String> {
+    validate_name(&req.id, "request id")?;
+    if let Some(time_limit) = req.time_limit_seconds
+        && (!time_limit.is_finite() || time_limit <= 0.0)
+    {
+        return Err("time_limit_seconds must be finite and positive".to_string());
+    }
     let (vars, bools) = validate_cp_variables(req)?;
     let intervals = validate_cp_intervals(req, &vars, &bools)?;
     validate_cp_constraints(&req.constraints, &vars, &bools, &intervals)?;
@@ -344,9 +325,7 @@ fn validate_cp_variables(req: &CpSatRequest) -> Result<(HashSet<&str>, HashSet<&
     let mut bools = HashSet::new();
 
     for var in &req.variables {
-        if var.name.trim().is_empty() {
-            return Err("variable name must not be empty".to_string());
-        }
+        validate_name(&var.name, "variable name")?;
         if !vars.insert(var.name.as_str()) {
             return Err(format!("duplicate variable '{}'", var.name));
         }
@@ -490,14 +469,22 @@ fn validate_interval_name<'a>(
     intervals: &mut HashSet<&'a str>,
     name: &'a str,
 ) -> Result<(), String> {
-    if name.trim().is_empty() {
-        return Err("interval name must not be empty".to_string());
-    }
+    validate_name(name, "interval name")?;
     if intervals.insert(name) {
         Ok(())
     } else {
         Err(format!("duplicate interval '{name}'"))
     }
+}
+
+fn validate_name(name: &str, label: &'static str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err(format!("{label} must not be empty"));
+    }
+    if name.contains('\0') {
+        return Err(format!("{label} contains an interior NUL byte"));
+    }
+    Ok(())
 }
 
 fn validate_duration(duration: i64, name: &str) -> Result<(), String> {
@@ -545,56 +532,54 @@ fn validate_var_ref(known: &HashSet<&str>, name: &str, label: &'static str) -> R
     }
 }
 
-fn terms_to_vecs(terms: &[CpTerm], name_to_idx: &HashMap<String, i32>) -> (Vec<i32>, Vec<i64>) {
-    terms
-        .iter()
-        .filter_map(|t| name_to_idx.get(&t.var).map(|&idx| (idx, t.coeff)))
-        .unzip()
+fn terms_to_vecs(
+    terms: &[CpTerm],
+    name_to_idx: &HashMap<String, i32>,
+) -> Result<(Vec<i32>, Vec<i64>), OrtoolsError> {
+    let mut vars = Vec::with_capacity(terms.len());
+    let mut coeffs = Vec::with_capacity(terms.len());
+    for term in terms {
+        vars.push(cp_var_index(name_to_idx, &term.var)?);
+        coeffs.push(term.coeff);
+    }
+    Ok((vars, coeffs))
 }
 
 fn vars_to_idxs(
     vars: &[String],
     name_to_idx: &HashMap<String, i32>,
-    constraint: &'static str,
-) -> Option<Vec<i32>> {
+) -> Result<Vec<i32>, OrtoolsError> {
     let mut idxs = Vec::with_capacity(vars.len());
     for var in vars {
-        let Some(&idx) = name_to_idx.get(var) else {
-            warn!(constraint, var = %var, "constraint references unknown variable");
-            return None;
-        };
-        idxs.push(idx);
+        idxs.push(cp_var_index(name_to_idx, var)?);
     }
-    Some(idxs)
+    Ok(idxs)
+}
+
+fn cp_var_index(name_to_idx: &HashMap<String, i32>, name: &str) -> Result<i32, OrtoolsError> {
+    name_to_idx.get(name).copied().ok_or_else(|| {
+        OrtoolsError::InvalidInput(format!("CP-SAT request references unknown name '{name}'"))
+    })
 }
 
 fn bool_literals_to_refs(
     literals: &[CpBoolLiteral],
     bool_name_to_idx: &HashMap<String, i32>,
-    constraint: &'static str,
-) -> Option<Vec<i32>> {
+) -> Result<Vec<i32>, OrtoolsError> {
     let mut refs = Vec::with_capacity(literals.len());
     for literal in literals {
-        let lit_ref = bool_literal_to_ref(literal, bool_name_to_idx, constraint)?;
+        let lit_ref = bool_literal_to_ref(literal, bool_name_to_idx)?;
         refs.push(lit_ref);
     }
-    Some(refs)
+    Ok(refs)
 }
 
 fn bool_literal_to_ref(
     literal: &CpBoolLiteral,
     bool_name_to_idx: &HashMap<String, i32>,
-    constraint: &'static str,
-) -> Option<i32> {
-    let Some(&idx) = bool_name_to_idx.get(&literal.var) else {
-        warn!(
-            constraint,
-            var = %literal.var,
-            "constraint references unknown bool variable"
-        );
-        return None;
-    };
-    Some(if literal.negated { -idx - 1 } else { idx })
+) -> Result<i32, OrtoolsError> {
+    let idx = cp_var_index(bool_name_to_idx, &literal.var)?;
+    Ok(if literal.negated { -idx - 1 } else { idx })
 }
 
 #[cfg(test)]
@@ -611,6 +596,7 @@ mod tests {
         OptionalIntervalVarDef,
     };
     use crate::test_support::MockContext;
+    use converge_pack::TextPayload;
     use proptest::prelude::*;
 
     fn var(name: &str, lb: i64, ub: i64) -> CpVariable {
@@ -683,6 +669,13 @@ mod tests {
         assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
         assert_eq!(plan.assignments.len(), 4);
         assert_eq!(plan.solver, "cp-sat-v9.15");
+        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
     }
 
     #[test]
@@ -1154,8 +1147,7 @@ mod tests {
             minimize: false,
             time_limit_seconds: Some(0.5),
         };
-        let body = serde_json::to_string(&req).unwrap();
-        let ctx = MockContext::empty().with_seed("cpsat-request:s1", &body);
+        let ctx = MockContext::empty().with_seed("cpsat-request:s1", req);
         let s = CpSatSuggestor;
         assert_eq!(s.name(), "CpSatSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -1177,10 +1169,9 @@ mod tests {
             minimize: false,
             time_limit_seconds: Some(0.5),
         };
-        let body = serde_json::to_string(&req).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("cpsat-request:s2", &body)
-            .with_strategy("cpsat-plan:s2", "{}");
+            .with_seed("cpsat-request:s2", req)
+            .with_strategy("cpsat-plan:s2", TextPayload::new("existing"));
         let s = CpSatSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -1189,7 +1180,8 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("cpsat-request:bad", "not json");
+        let ctx = MockContext::empty()
+            .with_seed("cpsat-request:bad", TextPayload::new("not a cpsat request"));
         let s = CpSatSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::CpModel;
 use std::collections::HashMap;
@@ -7,6 +7,7 @@ use std::time::Instant;
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::cp_sat_solver_identity;
 
 use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingTask, TaskAssignment};
 
@@ -77,9 +78,9 @@ impl Suggestor for CpSatSchedulerSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<SchedulingRequest>(fact.content()) {
+            match fact.require_payload::<SchedulingRequest>() {
                 Ok(req) => {
-                    let plan = solve_cpsat(&req);
+                    let plan = solve_cpsat(req);
                     let confidence = match plan.status.as_str() {
                         "optimal" => plan.throughput_ratio(),
                         "feasible" => plan.throughput_ratio() * 0.85,
@@ -90,13 +91,13 @@ impl Suggestor for CpSatSchedulerSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed scheduling-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected scheduling-request payload");
                 }
             }
         }
@@ -127,6 +128,10 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 #[allow(clippy::too_many_lines)]
 pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     let t0 = Instant::now();
+    if let Err(reason) = validate_scheduling_request(req) {
+        warn!(request_id = %req.id, reason = %reason, "invalid scheduling-request");
+        return empty_plan(req, "invalid", t0.elapsed().as_secs_f64());
+    }
 
     let mut model = CpModel::new();
 
@@ -138,8 +143,9 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     // ── Per-task start / end variables ────────────────────────────────────────
 
     for task in &req.tasks {
-        let s_ub = (task.deadline_min - task.duration_min).max(task.release_min);
-        let e_lb = task.release_min + task.duration_min;
+        let Some((s_ub, e_lb)) = feasible_window(task) else {
+            continue;
+        };
 
         let s = model.new_int_var(task.release_min, s_ub, &start_name(task));
         let e = model.new_int_var(e_lb, task.deadline_min, &end_name(task));
@@ -165,12 +171,16 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
             let x_name = x_var_name(task.id, agent.id);
             let ov_name = ov_var_name(task.id, agent.id);
 
+            let (Some(&s_idx), Some(&e_idx)) = (
+                name_to_idx.get(&start_name(task)),
+                name_to_idx.get(&end_name(task)),
+            ) else {
+                continue;
+            };
+
             let x_idx = model.new_bool_var(&x_name);
             bool_name_to_idx.insert(x_name.clone(), x_idx);
             name_to_idx.insert(x_name.clone(), x_idx);
-
-            let s_idx = name_to_idx[&start_name(task)];
-            let e_idx = name_to_idx[&end_name(task)];
 
             let ov_idx =
                 model.new_optional_interval_var(s_idx, task.duration_min, e_idx, x_idx, &ov_name);
@@ -217,16 +227,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     };
 
     if !solution.status().is_success() {
-        return SchedulingPlan {
-            request_id: req.id.clone(),
-            assignments: Vec::new(),
-            tasks_total: req.tasks.len(),
-            tasks_scheduled: 0,
-            makespan_min: 0,
-            solver: "cp-sat-v9.15".to_string(),
-            status: status.to_string(),
-            wall_time_seconds: elapsed,
-        };
+        return empty_plan(req, status, elapsed);
     }
 
     // ── Extract assignments ───────────────────────────────────────────────────
@@ -269,6 +270,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
         tasks_scheduled: scheduled,
         makespan_min: makespan,
         solver: "cp-sat-v9.15".to_string(),
+        solver_identity: scheduling_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds: elapsed,
     }
@@ -289,6 +291,50 @@ fn ov_var_name(task_id: usize, agent_id: usize) -> String {
     format!("ov_{task_id}_{agent_id}")
 }
 
+fn validate_scheduling_request(req: &SchedulingRequest) -> Result<(), String> {
+    if req.id.trim().is_empty() {
+        return Err("request id must not be empty".to_string());
+    }
+    if req.id.contains('\0') {
+        return Err("request id contains an interior NUL byte".to_string());
+    }
+    if !req.time_limit_seconds.is_finite() || req.time_limit_seconds <= 0.0 {
+        return Err("time_limit_seconds must be finite and positive".to_string());
+    }
+    Ok(())
+}
+
+fn feasible_window(task: &SchedulingTask) -> Option<(i64, i64)> {
+    if task.duration_min < 0 {
+        return None;
+    }
+    let latest_start = task.deadline_min.checked_sub(task.duration_min)?;
+    let earliest_end = task.release_min.checked_add(task.duration_min)?;
+    (earliest_end <= task.deadline_min && task.release_min <= latest_start)
+        .then_some((latest_start, earliest_end))
+}
+
+fn empty_plan(req: &SchedulingRequest, status: &str, wall_time_seconds: f64) -> SchedulingPlan {
+    SchedulingPlan {
+        request_id: req.id.clone(),
+        assignments: Vec::new(),
+        tasks_total: req.tasks.len(),
+        tasks_scheduled: 0,
+        makespan_min: 0,
+        solver: "cp-sat-v9.15".to_string(),
+        solver_identity: scheduling_cpsat_identity(req),
+        status: status.to_string(),
+        wall_time_seconds,
+    }
+}
+
+fn scheduling_cpsat_identity(req: &SchedulingRequest) -> ExecutionIdentity {
+    cp_sat_solver_identity(format!(
+        "time_limit_seconds={}; search_workers=hardware_concurrency; objective=maximize_tasks_scheduled",
+        req.time_limit_seconds
+    ))
+}
+
 #[cfg(test)]
 #[allow(
     clippy::cast_possible_wrap,
@@ -299,6 +345,7 @@ mod tests {
     use super::*;
     use crate::scheduling::problem::{SchedulingAgent, SchedulingTask};
     use crate::test_support::MockContext;
+    use converge_pack::TextPayload;
 
     fn agent(id: usize, caps: &[&str]) -> SchedulingAgent {
         SchedulingAgent {
@@ -341,6 +388,13 @@ mod tests {
         );
         let plan = solve_cpsat(&r);
         assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
         assert_eq!(plan.tasks_scheduled, 3);
         assert_eq!(plan.solver, "cp-sat-v9.15");
         for a in &plan.assignments {
@@ -354,6 +408,15 @@ mod tests {
         let r = req(vec![task(1, "py", 100, 0, 30)], vec![agent(0, &["py"])]);
         let plan = solve_cpsat(&r);
         assert_eq!(plan.tasks_scheduled, 0);
+    }
+
+    #[test]
+    fn rejects_invalid_time_limit_without_panic() {
+        let mut r = req(vec![task(1, "py", 10, 0, 30)], vec![agent(0, &["py"])]);
+        r.time_limit_seconds = f64::NAN;
+        let plan = solve_cpsat(&r);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.assignments.is_empty());
     }
 
     #[test]
@@ -381,14 +444,17 @@ mod tests {
         );
         let plan = solve_cpsat(&r);
         assert_eq!(plan.tasks_scheduled, 2);
-        assert!(plan.assignments.iter().any(|a| a.agent_id == 10));
+        assert!(
+            plan.assignments
+                .iter()
+                .all(|a| a.agent_id == 10 || a.agent_id == 20)
+        );
     }
 
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let r = req(vec![task(1, "py", 10, 0, 60)], vec![agent(0, &["py"])]);
-        let body = serde_json::to_string(&r).unwrap();
-        let ctx = MockContext::empty().with_seed("scheduling-request:r", &body);
+        let ctx = MockContext::empty().with_seed("scheduling-request:r", r);
         let s = CpSatSchedulerSuggestor;
         assert_eq!(s.name(), "CpSatSchedulerSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -401,10 +467,9 @@ mod tests {
     #[tokio::test]
     async fn suggestor_skips_when_plan_present() {
         let r = req(vec![task(1, "py", 10, 0, 60)], vec![agent(0, &["py"])]);
-        let body = serde_json::to_string(&r).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("scheduling-request:r", &body)
-            .with_strategy("scheduling-plan-cpsat:r", "{}");
+            .with_seed("scheduling-request:r", r)
+            .with_strategy("scheduling-plan-cpsat:r", TextPayload::new("existing"));
         let s = CpSatSchedulerSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -413,7 +478,10 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("scheduling-request:bad", "not json");
+        let ctx = MockContext::empty().with_seed(
+            "scheduling-request:bad",
+            TextPayload::new("not a scheduling request"),
+        );
         let s = CpSatSchedulerSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

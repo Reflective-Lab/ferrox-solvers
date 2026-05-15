@@ -31,8 +31,8 @@ Ferrox finds the provably correct answer within it.
 
 Ferrox is a Converge extension. Converge owns the shared suggestor contract and
 promotion authority; Ferrox owns solver models, native solver bindings,
-confidence semantics, solver-backed suggestors, typed proposal provenance, and
-suggestor-boundary tracing.
+confidence semantics, solver-backed suggestors, typed request/plan payloads,
+typed proposal provenance, and suggestor-boundary tracing.
 
 ### Layout
 
@@ -111,6 +111,12 @@ The Engine runs all accepting Suggestors, collects their proposals, and lets con
 
 Ferrox contributes Suggestors that compete on provable quality.
 For every problem class, two implementations are available:
+
+Solver requests and plans are typed Converge fact payloads inside the process.
+The `ContextKey` and fact id route the fact; the payload family and version
+identify the schema. JSON or other wire serialization belongs at process,
+storage, replay, and transport borders, not between Ferrox Suggestors and the
+Converge context.
 
 | Problem class | Fast / portable surface | Confidence | Native / stronger surface | Confidence |
 |---|---|---|---|---|
@@ -289,6 +295,20 @@ On a three-shift operation, that difference compounds into days of recovered cap
 Both are compiled from source and linked statically into the gRPC server.
 No external services, no API calls, no rate limits.
 
+Solver-backed Ferrox-owned plans carry Converge's shared
+`ExecutionIdentity` in their `solver_identity` field alongside the `solver`
+label. The identity records the native backend, pinned version, expected and
+actual checkout commit, source mode, build flags, runtime solver config, and
+producer crate version so audit can distinguish the same model solved by
+different native bits or runtime settings. Greedy plans use the same contract
+with no native identity.
+
+When Ferrox solves a generic Converge contract, such as
+`FormationPlan`, solver identity stays out of the generic plan. The CP-SAT
+formation suggestor emits Converge's generic
+`converge.execution_identity.evidence` evaluation fact linked to the strategy
+plan id.
+
 ---
 
 ## Architecture
@@ -361,6 +381,9 @@ just up                 # Docker Compose with mTLS
 
 Authentication via `Authorization: Bearer <token>` (set `FERROX_AUTH_TOKEN`).
 TLS certificates in `./tls/` — generate dev certs with `just tls-dev-certs`.
+Native solve calls run on Tokio's blocking pool behind a concurrency limiter.
+Set `FERROX_SERVER_MAX_BLOCKING_SOLVES` to raise the default limit of `1` when
+the host has enough cores and memory for concurrent solver requests.
 
 ---
 

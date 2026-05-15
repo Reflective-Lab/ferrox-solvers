@@ -14,3 +14,37 @@ source: mixed
 - [x] Adopt Extension Release Checklist (security-audit, coverage, performance-profile, soak)
 - [x] First clean `just release-check` run
 - [x] Tag v0.5.1
+
+## Next: Native Solver Assurance Hardening
+
+**Target:** 2026-05/06 | **Tracks:** OR-Tools + HiGHS reproducibility
+
+Current state: Ferrox solver-backed outputs carry Converge's shared
+`ExecutionIdentity`, and CP-SAT formation emits companion
+`ExecutionIdentityEvidence` instead of leaking native details into
+`FormationPlan`. The remaining work is reproducibility and CI enforcement:
+making sure the identity Ferrox records is backed by a checked-in dependency
+manifest and by platform CI that fails on native drift.
+
+Why this matters:
+
+- **Operator perspective:** OR-Tools and HiGHS can produce different behavior
+  across versions, commits, or build flags. Production should not depend on an
+  accidental local native install.
+- **Audit perspective:** solver output is only inspectable if a later reviewer
+  can connect the plan to the exact native source, build, and runtime config.
+- **Release/CI perspective:** native checkout drift should break CI before a
+  release artifact is cut.
+- **Developer perspective:** external native roots are useful for local work,
+  but release checks need a pinned, repeatable baseline.
+
+- [ ] Add a checked-in native dependency lock/audit manifest for OR-Tools and
+      HiGHS with name, version, source URL, expected checkout commit, build
+      flags, and available artifact/header/library fingerprints.
+- [ ] Add Linux and macOS CI coverage for full-feature Ferrox check, clippy,
+      and tests.
+- [ ] Make CI fail when the OR-Tools or HiGHS checkout commit differs from the
+      checked-in manifest.
+- [x] Record native solver identity on solver-backed Ferrox outputs, including
+      backend version/build identity and runtime solver config, so audit can
+      distinguish the same model solved by different native bits.

@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
-use ferrox_ortools_sys::safe::LinearSolver;
-use std::collections::HashMap;
+use ferrox_ortools_sys::safe::{LinearSolver, OrtoolsError};
+use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::glop_solver_identity;
 
 use super::problem::{LpPlan, LpRequest};
 
@@ -54,9 +55,9 @@ impl Suggestor for GlopLpSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<LpRequest>(fact.content()) {
+            match fact.require_payload::<LpRequest>() {
                 Ok(req) => {
-                    let plan = solve_lp(&req);
+                    let plan = solve_lp(req);
                     let confidence = match plan.status.as_str() {
                         "optimal" => 1.0,
                         "feasible" => 0.7,
@@ -67,13 +68,13 @@ impl Suggestor for GlopLpSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{}", plan.request_id),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed glop-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected glop-request payload");
                 }
             }
         }
@@ -98,27 +99,44 @@ fn plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 }
 
 pub fn solve_lp(req: &LpRequest) -> LpPlan {
-    let mut solver = LinearSolver::new_glop(&req.id);
+    if let Err(reason) = validate_lp_request(req) {
+        warn!(request_id = %req.id, reason = %reason, "invalid glop-request");
+        return empty_plan(req, "invalid");
+    }
+
+    match solve_lp_checked(req) {
+        Ok(plan) => plan,
+        Err(OrtoolsError::InvalidInput(reason)) => {
+            warn!(request_id = %req.id, reason = %reason, "invalid glop-request");
+            empty_plan(req, "invalid")
+        }
+        Err(error) => {
+            warn!(request_id = %req.id, error = %error, "GLOP native solve failed");
+            empty_plan(req, "error")
+        }
+    }
+}
+
+fn solve_lp_checked(req: &LpRequest) -> Result<LpPlan, OrtoolsError> {
+    let mut solver = LinearSolver::try_new_glop(&req.id)?;
     let mut name_to_idx: HashMap<String, i32> = HashMap::new();
 
     for var in &req.variables {
-        let idx = solver.num_var(var.lb, var.ub, &var.name);
+        let idx = solver.try_num_var(var.lb, var.ub, &var.name)?;
         name_to_idx.insert(var.name.clone(), idx);
     }
 
     for con in &req.constraints {
-        let ci = solver.add_constraint(con.lb, con.ub, &con.name);
+        let ci = solver.try_add_constraint(con.lb, con.ub, &con.name)?;
         for term in &con.terms {
-            if let Some(&vi) = name_to_idx.get(&term.var) {
-                solver.set_constraint_coeff(ci, vi, term.coeff);
-            }
+            let vi = variable_index(&name_to_idx, &term.var)?;
+            solver.try_set_constraint_coeff(ci, vi, term.coeff)?;
         }
     }
 
     for term in &req.objective.terms {
-        if let Some(&vi) = name_to_idx.get(&term.var) {
-            solver.set_objective_coeff(vi, term.coeff);
-        }
+        let vi = variable_index(&name_to_idx, &term.var)?;
+        solver.try_set_objective_coeff(vi, term.coeff)?;
     }
 
     if req.objective.maximize {
@@ -127,7 +145,8 @@ pub fn solve_lp(req: &LpRequest) -> LpPlan {
         solver.minimize();
     }
 
-    let status = match solver.solve() {
+    let solve_status = solver.try_solve()?;
+    let status = match solve_status {
         OrtoolsStatus::Optimal => "optimal",
         OrtoolsStatus::Feasible => "feasible",
         OrtoolsStatus::Infeasible => "infeasible",
@@ -135,29 +154,121 @@ pub fn solve_lp(req: &LpRequest) -> LpPlan {
         _ => "error",
     };
 
-    let values: Vec<(String, f64)> = req
-        .variables
-        .iter()
-        .filter_map(|v| {
-            name_to_idx
-                .get(&v.name)
-                .map(|&vi| (v.name.clone(), solver.var_value(vi)))
-        })
-        .collect();
+    let values: Vec<(String, f64)> = if solve_status.is_success() {
+        req.variables
+            .iter()
+            .map(|v| {
+                let vi = variable_index(&name_to_idx, &v.name)?;
+                Ok((v.name.clone(), solver.try_var_value(vi)?))
+            })
+            .collect::<Result<_, OrtoolsError>>()?
+    } else {
+        Vec::new()
+    };
 
-    let objective_value = if matches!(status, "optimal" | "feasible") {
-        solver.objective_value()
+    let objective_value = if solve_status.is_success() {
+        solver.try_objective_value()?
     } else {
         0.0
     };
 
-    LpPlan {
+    Ok(LpPlan {
         request_id: req.id.clone(),
         status: status.to_string(),
         values,
         objective_value,
         solver: "glop-v9.15".to_string(),
+        solver_identity: lp_identity(req),
+    })
+}
+
+fn variable_index(vars: &HashMap<String, i32>, name: &str) -> Result<i32, OrtoolsError> {
+    vars.get(name).copied().ok_or_else(|| {
+        OrtoolsError::InvalidInput(format!("LP term references unknown variable '{name}'"))
+    })
+}
+
+fn validate_lp_request(req: &LpRequest) -> Result<(), String> {
+    validate_name(&req.id, "request id")?;
+    if let Some(time_limit) = req.time_limit_seconds
+        && (!time_limit.is_finite() || time_limit <= 0.0)
+    {
+        return Err("time_limit_seconds must be finite and positive".to_string());
     }
+
+    let mut vars = HashSet::new();
+    for var in &req.variables {
+        validate_name(&var.name, "variable name")?;
+        if !vars.insert(var.name.as_str()) {
+            return Err(format!("duplicate variable '{}'", var.name));
+        }
+        validate_bounds(var.lb, var.ub, "variable bounds")?;
+    }
+
+    for constraint in &req.constraints {
+        validate_name(&constraint.name, "constraint name")?;
+        validate_bounds(constraint.lb, constraint.ub, "constraint bounds")?;
+        validate_terms(&constraint.terms, &vars)?;
+    }
+    validate_terms(&req.objective.terms, &vars)?;
+
+    Ok(())
+}
+
+fn validate_name(name: &str, label: &'static str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err(format!("{label} must not be empty"));
+    }
+    if name.contains('\0') {
+        return Err(format!("{label} contains an interior NUL byte"));
+    }
+    Ok(())
+}
+
+fn validate_bounds(lb: f64, ub: f64, label: &'static str) -> Result<(), String> {
+    if lb.is_nan() || ub.is_nan() {
+        return Err(format!("{label} must not be NaN"));
+    }
+    if lb > ub {
+        return Err(format!("{label} lower bound exceeds upper bound"));
+    }
+    Ok(())
+}
+
+fn validate_terms(terms: &[super::problem::LpTerm], vars: &HashSet<&str>) -> Result<(), String> {
+    for term in terms {
+        if !term.coeff.is_finite() {
+            return Err(format!(
+                "term for variable '{}' has non-finite coefficient",
+                term.var
+            ));
+        }
+        if !vars.contains(term.var.as_str()) {
+            return Err(format!("term references unknown variable '{}'", term.var));
+        }
+    }
+    Ok(())
+}
+
+fn empty_plan(req: &LpRequest, status: &'static str) -> LpPlan {
+    LpPlan {
+        request_id: req.id.clone(),
+        status: status.to_string(),
+        values: Vec::new(),
+        objective_value: 0.0,
+        solver: "glop-v9.15".to_string(),
+        solver_identity: lp_identity(req),
+    }
+}
+
+fn lp_identity(req: &LpRequest) -> ExecutionIdentity {
+    let time_limit = req
+        .time_limit_seconds
+        .map_or_else(|| "none".to_string(), |limit| limit.to_string());
+    glop_solver_identity(format!(
+        "time_limit_seconds={time_limit}; time_limit_applied=false; maximize={}",
+        req.objective.maximize
+    ))
 }
 
 #[cfg(test)]
@@ -166,6 +277,7 @@ mod tests {
     use super::*;
     use crate::lp::problem::{LpConstraint, LpObjective, LpTerm, LpVariable};
     use crate::test_support::MockContext;
+    use converge_pack::TextPayload;
 
     fn var(name: &str, lb: f64, ub: f64) -> LpVariable {
         LpVariable {
@@ -212,6 +324,13 @@ mod tests {
         assert_eq!(plan.status, "optimal");
         assert!((plan.objective_value - 14.0 / 5.0).abs() < 1e-6);
         assert_eq!(plan.solver, "glop-v9.15");
+        assert_eq!(plan.solver_identity.backend, "glop-v9.15");
+        assert!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
     }
 
     #[test]
@@ -260,6 +379,60 @@ mod tests {
         assert_eq!(plan.objective_value, 0.0);
     }
 
+    #[test]
+    fn rejects_unknown_constraint_variable() {
+        let req = LpRequest {
+            id: "bad-ref".into(),
+            variables: vec![var("x", 0.0, 1.0)],
+            constraints: vec![LpConstraint {
+                name: "c".into(),
+                lb: f64::NEG_INFINITY,
+                ub: 1.0,
+                terms: vec![term("missing", 1.0)],
+            }],
+            objective: LpObjective {
+                terms: vec![term("x", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+        };
+        let plan = solve_lp(&req);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.values.is_empty());
+    }
+
+    #[test]
+    fn rejects_unknown_objective_variable() {
+        let req = LpRequest {
+            id: "bad-obj".into(),
+            variables: vec![var("x", 0.0, 1.0)],
+            constraints: vec![],
+            objective: LpObjective {
+                terms: vec![term("missing", 1.0)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+        };
+        let plan = solve_lp(&req);
+        assert_eq!(plan.status, "invalid");
+    }
+
+    #[test]
+    fn rejects_non_finite_lp_coefficient() {
+        let req = LpRequest {
+            id: "bad-coeff".into(),
+            variables: vec![var("x", 0.0, 1.0)],
+            constraints: vec![],
+            objective: LpObjective {
+                terms: vec![term("x", f64::NAN)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+        };
+        let plan = solve_lp(&req);
+        assert_eq!(plan.status, "invalid");
+    }
+
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let req = LpRequest {
@@ -272,8 +445,7 @@ mod tests {
             },
             time_limit_seconds: Some(0.5),
         };
-        let body = serde_json::to_string(&req).unwrap();
-        let ctx = MockContext::empty().with_seed("glop-request:s", &body);
+        let ctx = MockContext::empty().with_seed("glop-request:s", req);
         let s = GlopLpSuggestor;
         assert_eq!(s.name(), "GlopLpSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -295,10 +467,9 @@ mod tests {
             },
             time_limit_seconds: None,
         };
-        let body = serde_json::to_string(&req).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("glop-request:s2", &body)
-            .with_strategy("glop-plan:s2", "{}");
+            .with_seed("glop-request:s2", req)
+            .with_strategy("glop-plan:s2", TextPayload::new("existing"));
         let s = GlopLpSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -307,7 +478,8 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("glop-request:bad", "not json");
+        let ctx = MockContext::empty()
+            .with_seed("glop-request:bad", TextPayload::new("not a glop request"));
         let s = GlopLpSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

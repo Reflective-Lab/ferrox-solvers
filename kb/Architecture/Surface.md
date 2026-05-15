@@ -11,13 +11,20 @@ plus optional adapter crates with adapter-qualified names.
 
 - `ferrox` — solver models, native solver wrappers, and solver-backed
   Converge suggestors.
+- Typed request and plan payloads for CP-SAT, LP, MIP, network flow,
+  scheduling, job shop, VRPTW, and Formation planning. Payload schema identity
+  is the Converge `(family, version)` pair; keys and ids route instances.
+- `converge.execution_identity.evidence` facts emitted beside CP-SAT
+  formation plans, keeping native execution identity out of Converge's generic
+  `FormationPlan` payload while using the shared audit contract.
 - `ProvenanceSource` and `FERROX_PROVENANCE` for typed proposal provenance
   before crossing into `converge-pack::ProposedFact`.
 - `ferrox.suggestor.execute` tracing spans on solver suggestor execution.
 
 ## Contract dependencies
 
-- `converge-pack` — `Pack`, `ProposedFact`, `ProposedPlan`, `ProblemSpec`
+- `converge-pack` — `FactPayload`, `Pack`, `ProposedFact`, `ProposedPlan`,
+  `ProblemSpec`
 - `converge-model` — semantic types
 - `converge-provider` — capability identity (when applicable)
 

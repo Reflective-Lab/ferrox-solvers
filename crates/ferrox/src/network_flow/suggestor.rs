@@ -1,10 +1,11 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_ortools_sys::MinCostFlowStatus;
-use ferrox_ortools_sys::safe::SimpleMinCostFlow;
+use ferrox_ortools_sys::safe::{OrtoolsError, SimpleMinCostFlow};
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::min_cost_flow_solver_identity;
 
 use super::problem::{FlowArc, FlowArcPlan, FlowSolveMode, MinCostFlowPlan, MinCostFlowRequest};
 
@@ -53,22 +54,22 @@ impl Suggestor for MinCostFlowSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<MinCostFlowRequest>(fact.content()) {
+            match fact.require_payload::<MinCostFlowRequest>() {
                 Ok(req) => {
-                    let plan = solve_min_cost_flow(&req);
+                    let plan = solve_min_cost_flow(req);
                     let confidence = confidence(&plan);
                     proposals.push(
                         FERROX_PROVENANCE
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{}", plan.request_id),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed network-flow-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected network-flow-request payload");
                 }
             }
         }
@@ -102,59 +103,81 @@ pub fn solve_min_cost_flow(req: &MinCostFlowRequest) -> MinCostFlowPlan {
         return empty_plan(req, "unbalanced");
     }
 
+    match solve_min_cost_flow_checked(req, expected_flow) {
+        Ok(plan) => plan,
+        Err(OrtoolsError::InvalidInput(reason)) => {
+            warn!(request_id = %req.id, reason = %reason, "invalid network-flow-request");
+            empty_plan(req, "invalid")
+        }
+        Err(error) => {
+            warn!(request_id = %req.id, error = %error, "min-cost flow native solve failed");
+            empty_plan(req, "error")
+        }
+    }
+}
+
+fn solve_min_cost_flow_checked(
+    req: &MinCostFlowRequest,
+    expected_flow: i64,
+) -> Result<MinCostFlowPlan, OrtoolsError> {
     let reserve_nodes = reserve_nodes(req);
-    let reserve_arcs = i32::try_from(req.arcs.len()).unwrap_or(i32::MAX);
-    let mut flow = SimpleMinCostFlow::new(reserve_nodes, reserve_arcs);
+    let reserve_arcs = i32::try_from(req.arcs.len()).map_err(|_| {
+        OrtoolsError::InvalidInput("network-flow request has too many arcs".to_string())
+    })?;
+    let mut flow = SimpleMinCostFlow::try_new(reserve_nodes, reserve_arcs)?;
     let mut arc_ids = Vec::with_capacity(req.arcs.len());
 
     for arc in &req.arcs {
-        arc_ids.push(flow.add_arc_with_capacity_and_unit_cost(
+        arc_ids.push(flow.try_add_arc_with_capacity_and_unit_cost(
             arc.tail,
             arc.head,
             arc.capacity,
             arc.unit_cost,
-        ));
+        )?);
     }
 
     for supply in &req.supplies {
-        flow.set_node_supply(supply.node, supply.supply);
+        flow.try_set_node_supply(supply.node, supply.supply)?;
     }
 
     let status = match req.mode {
-        FlowSolveMode::BalancedMinCost => flow.solve(),
-        FlowSolveMode::MaxFlowMinCost => flow.solve_max_flow_with_min_cost(),
+        FlowSolveMode::BalancedMinCost => flow.try_solve()?,
+        FlowSolveMode::MaxFlowMinCost => flow.try_solve_max_flow_with_min_cost()?,
     };
 
     let status_label = min_cost_status_label(status);
     let success = status.is_success();
-    let fulfilled_flow = if success { flow.maximum_flow() } else { 0 };
+    let fulfilled_flow = if success { flow.try_maximum_flow()? } else { 0 };
     let fulfillment_ratio = flow_ratio(fulfilled_flow, expected_flow);
 
     let arcs = req
         .arcs
         .iter()
         .zip(arc_ids)
-        .map(|(arc, arc_id)| FlowArcPlan {
-            name: arc.name.clone(),
-            tail: arc.tail,
-            head: arc.head,
-            capacity: arc.capacity,
-            unit_cost: arc.unit_cost,
-            flow: if success { flow.flow(arc_id) } else { 0 },
+        .map(|(arc, arc_id)| {
+            Ok(FlowArcPlan {
+                name: arc.name.clone(),
+                tail: arc.tail,
+                head: arc.head,
+                capacity: arc.capacity,
+                unit_cost: arc.unit_cost,
+                flow: if success { flow.try_flow(arc_id)? } else { 0 },
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, OrtoolsError>>()?;
 
-    MinCostFlowPlan {
+    Ok(MinCostFlowPlan {
         request_id: req.id.clone(),
         status: status_label.to_string(),
         mode: req.mode,
         arcs,
-        optimal_cost: if success { flow.optimal_cost() } else { 0 },
+        optimal_cost: if success { flow.try_optimal_cost()? } else { 0 },
         expected_flow,
         fulfilled_flow,
         fulfillment_ratio,
         solver: "simple-min-cost-flow-v9.15".to_string(),
-    }
+        solver_identity: flow_identity(req, reserve_nodes, reserve_arcs),
+    })
 }
 
 fn validate_request(req: &MinCostFlowRequest) -> Option<&'static str> {
@@ -182,7 +205,19 @@ fn empty_plan(req: &MinCostFlowRequest, status: &'static str) -> MinCostFlowPlan
         fulfilled_flow: 0,
         fulfillment_ratio: flow_ratio(0, expected_flow),
         solver: "simple-min-cost-flow-v9.15".to_string(),
+        solver_identity: flow_identity(req, reserve_nodes(req), reserve_arcs(req)),
     }
+}
+
+fn flow_identity(
+    req: &MinCostFlowRequest,
+    reserve_nodes: i32,
+    reserve_arcs: i32,
+) -> ExecutionIdentity {
+    min_cost_flow_solver_identity(format!(
+        "mode={:?}; reserve_nodes={reserve_nodes}; reserve_arcs={reserve_arcs}",
+        req.mode
+    ))
 }
 
 fn empty_arc_plan(arc: &FlowArc) -> FlowArcPlan {
@@ -231,6 +266,10 @@ fn reserve_nodes(req: &MinCostFlowRequest) -> i32 {
         .map_or(0, |node| node.saturating_add(1))
 }
 
+fn reserve_arcs(req: &MinCostFlowRequest) -> i32 {
+    i32::try_from(req.arcs.len()).unwrap_or(i32::MAX)
+}
+
 #[allow(clippy::cast_precision_loss)]
 fn flow_ratio(fulfilled_flow: i64, expected_flow: i64) -> f64 {
     if expected_flow <= 0 {
@@ -254,6 +293,7 @@ mod tests {
     use super::*;
     use crate::network_flow::problem::{FlowArc, NodeSupply};
     use crate::test_support::MockContext;
+    use converge_pack::TextPayload;
     use proptest::prelude::*;
 
     fn arc(name: &str, tail: i32, head: i32, capacity: i64, unit_cost: i64) -> FlowArc {
@@ -295,6 +335,13 @@ mod tests {
         let flows: Vec<_> = plan.arcs.iter().map(|arc| arc.flow).collect();
         assert_eq!(flows, vec![3, 2, 3, 2]);
         assert_eq!(plan.solver, "simple-min-cost-flow-v9.15");
+        assert_eq!(plan.solver_identity.backend, "simple-min-cost-flow-v9.15");
+        assert!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
     }
 
     #[test]
@@ -358,8 +405,7 @@ mod tests {
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let req = balanced_request("s");
-        let body = serde_json::to_string(&req).unwrap();
-        let ctx = MockContext::empty().with_seed("network-flow-request:s", &body);
+        let ctx = MockContext::empty().with_seed("network-flow-request:s", req);
         let s = MinCostFlowSuggestor;
         assert_eq!(s.name(), "MinCostFlowSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -372,10 +418,9 @@ mod tests {
     #[tokio::test]
     async fn suggestor_skips_when_plan_present() {
         let req = balanced_request("s2");
-        let body = serde_json::to_string(&req).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("network-flow-request:s2", &body)
-            .with_strategy("network-flow-plan-ortools:s2", "{}");
+            .with_seed("network-flow-request:s2", req)
+            .with_strategy("network-flow-plan-ortools:s2", TextPayload::new("existing"));
         let s = MinCostFlowSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -384,7 +429,10 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("network-flow-request:bad", "not json");
+        let ctx = MockContext::empty().with_seed(
+            "network-flow-request:bad",
+            TextPayload::new("not a network-flow request"),
+        );
         let s = MinCostFlowSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

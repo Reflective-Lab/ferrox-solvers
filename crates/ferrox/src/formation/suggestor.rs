@@ -1,15 +1,19 @@
 use async_trait::async_trait;
 use converge_model::formation::{FormationPlan, FormationRequest, ProfileSnapshot, RoleAssignment};
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{
+    AgentEffect, Context, ContextKey, ExecutionIdentity, ExecutionIdentityEvidence, Suggestor,
+};
 use ferrox_ortools_sys::safe::CpModel;
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::cp_sat_solver_identity;
 
 // Uses a distinct prefix from converge-optimization's FormationAssemblySuggestor
 // so both can coexist in the same engine.
 const REQUEST_PREFIX: &str = "cpsat-formation-request:";
 const PLAN_PREFIX: &str = "cpsat-formation-plan:";
+const IDENTITY_PREFIX: &str = "cpsat-formation-plan-identity:";
 
 const W_LATENCY: i64 = 200;
 const W_COST: i64 = 100;
@@ -70,22 +74,30 @@ impl Suggestor for CpSatFormationSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<FormationRequest>(fact.content()) {
+            match fact.require_payload::<FormationRequest>() {
                 Ok(req) => {
-                    let plan = assemble_cp(&req, &self.catalog);
+                    let plan = assemble_cp(req, &self.catalog);
                     let confidence = plan.coverage_ratio;
+                    let plan_id = plan_id(&plan.request_id);
+                    let identity_id = format!("{IDENTITY_PREFIX}{}", plan.request_id);
+                    let identity = ExecutionIdentityEvidence::for_payload::<FormationPlan>(
+                        ContextKey::Strategies,
+                        plan_id.clone(),
+                        formation_cpsat_identity(req, self.catalog.len()),
+                    );
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(
-                                ContextKey::Strategies,
-                                format!("{PLAN_PREFIX}{}", plan.request_id),
-                                serde_json::to_string(&plan).unwrap_or_default(),
-                            )
+                            .proposed_fact(ContextKey::Strategies, plan_id, plan)
                             .with_confidence(confidence),
+                    );
+                    proposals.push(
+                        FERROX_PROVENANCE
+                            .proposed_fact(ContextKey::Evaluations, identity_id, identity)
+                            .with_confidence(1.0),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed cpsat-formation-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected cpsat-formation-request payload");
                 }
             }
         }
@@ -102,11 +114,24 @@ fn request_id(fact_id: &str) -> &str {
     fact_id.trim_start_matches(REQUEST_PREFIX)
 }
 
+fn plan_id(request_id: &str) -> String {
+    format!("{PLAN_PREFIX}{request_id}")
+}
+
 fn plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
-    let plan_id = format!("{PLAN_PREFIX}{request_id}");
+    let plan_id = plan_id(request_id);
     ctx.get(ContextKey::Strategies)
         .iter()
         .any(|f| f.id() == plan_id.as_str())
+}
+
+fn formation_cpsat_identity(req: &FormationRequest, catalog_size: usize) -> ExecutionIdentity {
+    cp_sat_solver_identity(format!(
+        "roles={};required_capabilities={};catalog={};time_limit_seconds=10",
+        req.required_roles.len(),
+        req.required_capabilities.len(),
+        catalog_size
+    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -261,7 +286,9 @@ fn score(snap: &ProfileSnapshot) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::MockContext;
     use converge_model::formation::{SuggestorCapability, SuggestorRole};
+    use converge_pack::{FactPayload, TextPayload};
     use converge_provider::{CostClass, LatencyClass};
 
     fn snap(name: &str, role: SuggestorRole, conf_max: f32) -> ProfileSnapshot {
@@ -274,6 +301,14 @@ mod tests {
             capabilities: vec![],
             confidence_min: 0.5,
             confidence_max: conf_max,
+        }
+    }
+
+    fn request(id: &str, required_roles: Vec<SuggestorRole>) -> FormationRequest {
+        FormationRequest {
+            id: id.to_string(),
+            required_roles,
+            required_capabilities: vec![],
         }
     }
 
@@ -337,5 +372,95 @@ mod tests {
         let plan = assemble_cp(&req, &catalog);
         assert_eq!(plan.assignments.len(), 1);
         assert_eq!(plan.assignments[0].suggestor, "optimizer");
+    }
+
+    #[tokio::test]
+    async fn suggestor_emits_plan_and_solver_identity() {
+        let suggestor = CpSatFormationSuggestor::new(vec![snap(
+            "analysis-cpsat",
+            SuggestorRole::Analysis,
+            0.95,
+        )]);
+        let ctx = MockContext::empty().with_seed(
+            "cpsat-formation-request:r5",
+            request("r5", vec![SuggestorRole::Analysis]),
+        );
+
+        let effect = suggestor.execute(&ctx).await;
+        assert_eq!(effect.proposals().len(), 2);
+
+        let plan_proposal = effect
+            .proposals()
+            .iter()
+            .find(|proposal| proposal.key() == ContextKey::Strategies)
+            .expect("strategy plan should be emitted");
+        assert_eq!(plan_proposal.id(), "cpsat-formation-plan:r5");
+        let plan = plan_proposal
+            .require_payload::<FormationPlan>()
+            .expect("strategy payload stays the generic FormationPlan");
+        assert_eq!(plan.request_id, "r5");
+        assert_eq!(plan.assignments.len(), 1);
+
+        let identity_proposal = effect
+            .proposals()
+            .iter()
+            .find(|proposal| proposal.key() == ContextKey::Evaluations)
+            .expect("solver identity evidence should be emitted");
+        assert_eq!(identity_proposal.id(), "cpsat-formation-plan-identity:r5");
+        let identity = identity_proposal
+            .require_payload::<ExecutionIdentityEvidence>()
+            .expect("identity evidence should be typed");
+        assert_eq!(identity.subject_key, ContextKey::Strategies);
+        assert_eq!(identity.subject_id, "cpsat-formation-plan:r5");
+        assert_eq!(identity.subject_family.as_str(), FormationPlan::FAMILY);
+        assert_eq!(identity.identity.backend, "cp-sat-v9.15");
+        assert!(
+            identity
+                .identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
+        assert!(identity.identity.runtime_config.contains("roles=1"));
+    }
+
+    #[tokio::test]
+    async fn malformed_request_does_not_emit_orphan_identity() {
+        let suggestor = CpSatFormationSuggestor::new(vec![snap(
+            "analysis-cpsat",
+            SuggestorRole::Analysis,
+            0.95,
+        )]);
+        let ctx = MockContext::empty().with_seed(
+            "cpsat-formation-request:bad",
+            TextPayload::new("not a formation request"),
+        );
+
+        let effect = suggestor.execute(&ctx).await;
+        assert!(effect.proposals().is_empty());
+    }
+
+    #[tokio::test]
+    async fn existing_plan_suppresses_companion_identity() {
+        let suggestor = CpSatFormationSuggestor::new(vec![snap(
+            "analysis-cpsat",
+            SuggestorRole::Analysis,
+            0.95,
+        )]);
+        let existing_plan = FormationPlan {
+            request_id: "r6".to_string(),
+            assignments: vec![],
+            unmatched_roles: vec![SuggestorRole::Analysis],
+            coverage_ratio: 0.0,
+        };
+        let ctx = MockContext::empty()
+            .with_seed(
+                "cpsat-formation-request:r6",
+                request("r6", vec![SuggestorRole::Analysis]),
+            )
+            .with_strategy("cpsat-formation-plan:r6", existing_plan);
+
+        let effect = suggestor.execute(&ctx).await;
+        assert!(effect.proposals().is_empty());
     }
 }

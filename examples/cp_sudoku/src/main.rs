@@ -4,7 +4,7 @@
 //! Rows, columns, and 2x2 boxes are all-different.
 
 use converge_core::{ContextState, Engine};
-use converge_pack::ContextKey;
+use converge_pack::{ContextKey, ProposedFact};
 use ferrox::cp::{ConstraintKind, CpSatPlan, CpSatRequest, CpSatSuggestor, CpVariable};
 
 #[tokio::main]
@@ -75,23 +75,24 @@ async fn main() {
     };
 
     let mut ctx = ContextState::new();
-    ctx.add_input(
+    ctx.add_proposal(ProposedFact::new(
         ContextKey::Seeds,
         "cpsat-request:sudoku-4x4",
-        &serde_json::to_string(&request).unwrap(),
-    )
+        request,
+        "cp-sudoku-example",
+    ))
     .unwrap();
 
     let result = engine.run(ctx).await.unwrap();
 
-    let plans: Vec<_> = result
+    let plans: Vec<&CpSatPlan> = result
         .context
         .get(ContextKey::Strategies)
         .iter()
-        .filter_map(|f| serde_json::from_str::<CpSatPlan>(f.content()).ok())
+        .filter_map(|f| f.payload::<CpSatPlan>())
         .collect();
 
-    for plan in &plans {
+    for plan in plans {
         println!("Status: {}", plan.status);
         println!("Solver: {}", plan.solver);
         println!("Time:   {:.3}s", plan.wall_time_seconds);

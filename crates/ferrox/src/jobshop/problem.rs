@@ -1,14 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+use converge_pack::{ExecutionIdentity, FactPayload};
+
 /// One operation within a job: must execute on `machine_id` for `duration` units.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Operation {
     pub machine_id: usize,
     pub duration: i64,
 }
 
 /// A job is an ordered sequence of operations; each must complete before the next begins.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Job {
     pub id: usize,
     pub name: String,
@@ -17,13 +21,19 @@ pub struct Job {
 }
 
 /// Seeded into `ContextKey::Seeds` with id prefix `"jspbench-request:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JobShopRequest {
     pub id: String,
     pub jobs: Vec<Job>,
     pub num_machines: usize,
     #[serde(default = "default_time_limit")]
     pub time_limit_seconds: f64,
+}
+
+impl FactPayload for JobShopRequest {
+    const FAMILY: &'static str = "ferrox.jobshop.request";
+    const VERSION: u16 = 1;
 }
 
 fn default_time_limit() -> f64 {
@@ -42,7 +52,8 @@ impl JobShopRequest {
 }
 
 /// A scheduled operation with resolved timing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScheduledOp {
     pub job_id: usize,
     pub job_name: String,
@@ -53,7 +64,8 @@ pub struct ScheduledOp {
 }
 
 /// Written to `ContextKey::Strategies` with id prefix `"jspbench-plan-<solver>:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JobShopPlan {
     pub request_id: String,
     pub schedule: Vec<ScheduledOp>,
@@ -61,9 +73,15 @@ pub struct JobShopPlan {
     /// Proven lower bound (available when status is `"optimal"`).
     pub lower_bound: Option<i64>,
     pub solver: String,
+    pub solver_identity: ExecutionIdentity,
     /// `"optimal"`, `"feasible"`, or `"error"`.
     pub status: String,
     pub wall_time_seconds: f64,
+}
+
+impl FactPayload for JobShopPlan {
+    const FAMILY: &'static str = "ferrox.jobshop.plan";
+    const VERSION: u16 = 1;
 }
 
 #[cfg(test)]

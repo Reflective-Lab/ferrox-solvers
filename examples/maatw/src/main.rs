@@ -16,7 +16,7 @@
 //! ```
 
 use converge_core::{ContextState, Engine};
-use converge_pack::{ContextKey, Suggestor};
+use converge_pack::{ContextKey, ProposedFact, Suggestor};
 use ferrox::scheduling::{
     CpSatSchedulerSuggestor, GreedySchedulerSuggestor, SchedulingAgent, SchedulingPlan,
     SchedulingRequest, SchedulingTask,
@@ -160,11 +160,12 @@ async fn main() {
     engine.register_suggestor(CpSatSchedulerSuggestor);
 
     let mut ctx = ContextState::new();
-    ctx.add_input(
+    ctx.add_proposal(ProposedFact::new(
         ContextKey::Seeds,
         "scheduling-request:maatw-demo",
-        serde_json::to_string(&req).unwrap(),
-    )
+        req.clone(),
+        "maatw-example",
+    ))
     .unwrap();
 
     let result = engine.run(ctx).await.unwrap();
@@ -174,12 +175,12 @@ async fn main() {
     let greedy_plan = strategies
         .iter()
         .find(|f| f.id().starts_with("scheduling-plan-greedy:"))
-        .and_then(|f| serde_json::from_str::<SchedulingPlan>(f.content()).ok());
+        .and_then(|f| f.payload::<SchedulingPlan>());
 
     let cpsat_plan = strategies
         .iter()
         .find(|f| f.id().starts_with("scheduling-plan-cpsat:"))
-        .and_then(|f| serde_json::from_str::<SchedulingPlan>(f.content()).ok());
+        .and_then(|f| f.payload::<SchedulingPlan>());
 
     // ── Report ────────────────────────────────────────────────────────────────
 

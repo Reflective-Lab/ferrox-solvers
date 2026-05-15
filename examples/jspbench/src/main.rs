@@ -16,7 +16,7 @@
 //! ```
 
 use converge_core::{ContextState, Engine};
-use converge_pack::{ContextKey, Suggestor};
+use converge_pack::{ContextKey, ProposedFact, Suggestor};
 use ferrox::jobshop::{
     CpSatJobShopSuggestor, GreedyJobShopSuggestor, Job, JobShopPlan, JobShopRequest, Operation,
 };
@@ -105,11 +105,12 @@ async fn main() {
     engine.register_suggestor(CpSatJobShopSuggestor);
 
     let mut ctx = ContextState::new();
-    ctx.add_input(
+    ctx.add_proposal(ProposedFact::new(
         ContextKey::Seeds,
         "jspbench-request:jspbench-demo",
-        serde_json::to_string(&req).unwrap(),
-    )
+        req,
+        "jspbench-example",
+    ))
     .unwrap();
 
     let result = engine.run(ctx).await.unwrap();
@@ -118,12 +119,12 @@ async fn main() {
     let greedy_plan = strategies
         .iter()
         .find(|f| f.id().starts_with("jspbench-plan-greedy:"))
-        .and_then(|f| serde_json::from_str::<JobShopPlan>(f.content()).ok());
+        .and_then(|f| f.payload::<JobShopPlan>());
 
     let cpsat_plan = strategies
         .iter()
         .find(|f| f.id().starts_with("jspbench-plan-cpsat:"))
-        .and_then(|f| serde_json::from_str::<JobShopPlan>(f.content()).ok());
+        .and_then(|f| f.payload::<JobShopPlan>());
 
     // ── Report ────────────────────────────────────────────────────────────────
 

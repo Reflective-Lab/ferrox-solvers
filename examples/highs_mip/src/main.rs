@@ -4,7 +4,7 @@
 //! Each project is a binary variable (fund or not).
 
 use converge_core::{ContextState, Engine};
-use converge_pack::ContextKey;
+use converge_pack::{ContextKey, ProposedFact};
 use ferrox::mip::{
     HighsMipSuggestor, MipConstraint, MipObjective, MipPlan, MipRequest, MipTerm, MipVariable,
     VarKind,
@@ -72,17 +72,18 @@ async fn main() {
     };
 
     let mut ctx = ContextState::new();
-    ctx.add_input(
+    ctx.add_proposal(ProposedFact::new(
         ContextKey::Seeds,
         "mip-request:capbudget",
-        &serde_json::to_string(&request).unwrap(),
-    )
+        request,
+        "highs-mip-example",
+    ))
     .unwrap();
 
     let result = engine.run(ctx).await.unwrap();
 
     for fact in result.context.get(ContextKey::Strategies) {
-        if let Ok(plan) = serde_json::from_str::<MipPlan>(fact.content()) {
+        if let Some(plan) = fact.payload::<MipPlan>() {
             println!("Status:     {}", plan.status);
             println!("Solver:     {}", plan.solver);
             println!("NPV:        ${:.1}M", plan.objective_value);

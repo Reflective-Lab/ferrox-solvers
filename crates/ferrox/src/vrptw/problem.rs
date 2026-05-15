@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use converge_pack::{ExecutionIdentity, FactPayload};
+
 /// A customer to be visited by the vehicle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Customer {
     pub id: usize,
     pub name: String,
@@ -24,7 +27,8 @@ impl Customer {
 }
 
 /// The depot — vehicle starts and ends here.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Depot {
     pub x: f64,
     pub y: f64,
@@ -45,7 +49,8 @@ impl Depot {
 /// Models a single-vehicle TSP with Time Windows (TSPTW).
 /// Customers are optional: the objective is to maximise customers visited
 /// while respecting time windows and the vehicle's return deadline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VrptwRequest {
     pub id: String,
     pub depot: Depot,
@@ -54,12 +59,18 @@ pub struct VrptwRequest {
     pub time_limit_seconds: f64,
 }
 
+impl FactPayload for VrptwRequest {
+    const FAMILY: &'static str = "ferrox.vrptw.request";
+    const VERSION: u16 = 1;
+}
+
 fn default_time_limit() -> f64 {
     30.0
 }
 
 /// One stop in the vehicle's route.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouteStop {
     pub customer_id: usize,
     pub customer_name: String,
@@ -68,7 +79,8 @@ pub struct RouteStop {
 }
 
 /// Written to `ContextKey::Strategies` with id prefix `"vrptw-plan-<solver>:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VrptwPlan {
     pub request_id: String,
     /// Ordered stops (depot → customers → depot is implied).
@@ -80,8 +92,14 @@ pub struct VrptwPlan {
     /// Time the vehicle returns to depot.
     pub return_time: i64,
     pub solver: String,
+    pub solver_identity: ExecutionIdentity,
     pub status: String,
     pub wall_time_seconds: f64,
+}
+
+impl FactPayload for VrptwPlan {
+    const FAMILY: &'static str = "ferrox.vrptw.plan";
+    const VERSION: u16 = 1;
 }
 
 impl VrptwPlan {
@@ -97,6 +115,7 @@ impl VrptwPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver_identity::non_native_solver_identity;
 
     fn cust(x: f64, y: f64) -> Customer {
         Customer {
@@ -138,6 +157,7 @@ mod tests {
             total_distance: 0.0,
             return_time: 0,
             solver: "x".into(),
+            solver_identity: non_native_solver_identity("x", "test"),
             status: "feasible".into(),
             wall_time_seconds: 0.0,
         };

@@ -4,6 +4,7 @@ use std::time::Instant;
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::non_native_solver_identity;
 
 use super::problem::{JobShopPlan, JobShopRequest, ScheduledOp};
 
@@ -63,9 +64,9 @@ impl Suggestor for GreedyJobShopSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<JobShopRequest>(fact.content()) {
+            match fact.require_payload::<JobShopRequest>() {
                 Ok(req) => {
-                    let plan = solve_greedy(&req);
+                    let plan = solve_greedy(req);
                     // SPT dispatching: bounded confidence.
                     let confidence = 0.55_f64;
                     proposals.push(
@@ -73,13 +74,13 @@ impl Suggestor for GreedyJobShopSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed jspbench-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected jspbench-request payload");
                 }
             }
         }
@@ -206,6 +207,10 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
         makespan,
         lower_bound: None,
         solver: "greedy-spt".to_string(),
+        solver_identity: non_native_solver_identity(
+            "greedy-spt",
+            "algorithm=shortest_processing_time",
+        ),
         status: "feasible".to_string(),
         wall_time_seconds: t0.elapsed().as_secs_f64(),
     }
@@ -217,6 +222,7 @@ mod tests {
     use crate::jobshop::problem::{Job, Operation};
     use crate::test_support::MockContext;
     use converge_pack::Suggestor;
+    use converge_pack::TextPayload;
 
     fn op(machine: usize, dur: i64) -> Operation {
         Operation {
@@ -304,8 +310,7 @@ mod tests {
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let r = req(vec![job(0, "j0", vec![op(0, 5)])], 1);
-        let body = serde_json::to_string(&r).unwrap();
-        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}j1"), &body);
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}j1"), r);
         let s = GreedyJobShopSuggestor;
         assert_eq!(s.name(), "GreedyJobShopSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -318,10 +323,9 @@ mod tests {
     #[tokio::test]
     async fn suggestor_skips_when_plan_present() {
         let r = req(vec![job(0, "j0", vec![op(0, 5)])], 1);
-        let body = serde_json::to_string(&r).unwrap();
         let ctx = MockContext::empty()
-            .with_seed(&format!("{REQUEST_PREFIX}j1"), &body)
-            .with_strategy("jspbench-plan-greedy:j1", "{}");
+            .with_seed(&format!("{REQUEST_PREFIX}j1"), r)
+            .with_strategy("jspbench-plan-greedy:j1", TextPayload::new("existing"));
         let s = GreedyJobShopSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -330,7 +334,10 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_skips_malformed_seed() {
-        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}bad"), "{not json");
+        let ctx = MockContext::empty().with_seed(
+            &format!("{REQUEST_PREFIX}bad"),
+            TextPayload::new("not a jobshop request"),
+        );
         let s = GreedyJobShopSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

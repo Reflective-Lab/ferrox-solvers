@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.94.0"
 license = "MIT"
@@ -16,9 +16,9 @@ repository = "https://github.com/Reflective-Lab/ferrox-solvers"
 
 [workspace.dependencies]
 # ferrox-internal
-ferrox-ortools-sys = { path = "crates/ortools-sys", package = "converge-ferrox-ortools-sys", version = "0.5.1" }
-ferrox-highs-sys   = { path = "crates/highs-sys",   package = "converge-ferrox-highs-sys",   version = "0.5.1" }
-ferrox             = { path = "crates/ferrox",      package = "converge-ferrox-solver",     version = "0.5.1" }
+ferrox-ortools-sys = { path = "crates/ortools-sys", package = "converge-ferrox-ortools-sys", version = "0.6.0" }
+ferrox-highs-sys   = { path = "crates/highs-sys",   package = "converge-ferrox-highs-sys",   version = "0.6.0" }
+ferrox             = { path = "crates/ferrox",      package = "converge-ferrox-solver",     version = "0.6.0" }
 
 # converge
 converge-pack = "3.8.1"
@@ -32,7 +32,7 @@ serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 thiserror   = "2"
 tracing     = "0.1"
-tokio       = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio       = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 proptest    = "1"
 
 [workspace.lints.rust]
@@ -45,3 +45,9 @@ must_use_candidate           = "allow"
 missing_errors_doc           = "allow"
 missing_panics_doc           = "allow"
 module_name_repetitions      = "allow"
+
+[patch.crates-io]
+converge-core = { path = "../../bedrock-platform/converge/crates/core" }
+converge-model = { path = "../../bedrock-platform/converge/crates/model" }
+converge-pack = { path = "../../bedrock-platform/converge/crates/pack" }
+converge-provider = { path = "../../bedrock-platform/converge/crates/provider" }

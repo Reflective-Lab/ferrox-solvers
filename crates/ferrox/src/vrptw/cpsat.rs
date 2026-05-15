@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::CpModel;
 use std::time::Instant;
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::cp_sat_solver_identity;
 
 use super::greedy::REQUEST_PREFIX;
 use super::problem::{Customer, RouteStop, VrptwPlan, VrptwRequest};
@@ -82,9 +83,9 @@ impl Suggestor for CpSatVrptwSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<VrptwRequest>(fact.content()) {
+            match fact.require_payload::<VrptwRequest>() {
                 Ok(req) => {
-                    let plan = solve_cpsat_vrptw(&req);
+                    let plan = solve_cpsat_vrptw(req);
                     let confidence = match plan.status.as_str() {
                         "optimal" => plan.visit_ratio(),
                         "feasible" => plan.visit_ratio() * 0.85,
@@ -95,13 +96,13 @@ impl Suggestor for CpSatVrptwSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed vrptw-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected vrptw-request payload");
                 }
             }
         }
@@ -136,6 +137,11 @@ fn own_plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 )]
 pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
     let t0 = Instant::now();
+    if let Err(reason) = validate_vrptw_request(req) {
+        warn!(request_id = %req.id, reason = %reason, "invalid vrptw-request");
+        return empty_plan(req, "invalid", t0.elapsed().as_secs_f64());
+    }
+
     let n = req.customers.len();
     // Node 0 = depot, 1..=n = customers.
     let num_nodes = n + 1;
@@ -283,17 +289,7 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
     };
 
     if !solution.status().is_success() {
-        return VrptwPlan {
-            request_id: req.id.clone(),
-            route: Vec::new(),
-            customers_total: n,
-            customers_visited: 0,
-            total_distance: 0.0,
-            return_time: 0,
-            solver: "cp-sat-v9.15".to_string(),
-            status: status.to_string(),
-            wall_time_seconds: elapsed,
-        };
+        return empty_plan(req, status, elapsed);
     }
 
     // ── Extract route from arc literals ───────────────────────────────────────
@@ -363,9 +359,90 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
         total_distance,
         return_time,
         solver: "cp-sat-v9.15".to_string(),
+        solver_identity: vrptw_cpsat_identity(req),
         status: status.to_string(),
         wall_time_seconds: elapsed,
     }
+}
+
+fn validate_vrptw_request(req: &VrptwRequest) -> Result<(), String> {
+    if req.id.trim().is_empty() {
+        return Err("request id must not be empty".to_string());
+    }
+    if req.id.contains('\0') {
+        return Err("request id contains an interior NUL byte".to_string());
+    }
+    if !req.time_limit_seconds.is_finite() || req.time_limit_seconds <= 0.0 {
+        return Err("time_limit_seconds must be finite and positive".to_string());
+    }
+    if !req.depot.x.is_finite() || !req.depot.y.is_finite() {
+        return Err("depot coordinates must be finite".to_string());
+    }
+    if req.depot.due_time < 0 {
+        return Err("depot due_time must be non-negative".to_string());
+    }
+    if req.depot.ready_time > req.depot.due_time {
+        return Err("depot ready_time exceeds due_time".to_string());
+    }
+    let horizon = scaled_time(req.depot.due_time, "depot due_time")?;
+    horizon
+        .checked_add(1)
+        .ok_or_else(|| "VRPTW big-M overflows i64".to_string())?;
+    scaled_time(req.depot.ready_time, "depot ready_time")?;
+
+    for customer in &req.customers {
+        if !customer.x.is_finite() || !customer.y.is_finite() {
+            return Err(format!(
+                "customer '{}' coordinates must be finite",
+                customer.id
+            ));
+        }
+        if customer.window_open > customer.window_close {
+            return Err(format!(
+                "customer '{}' window_open exceeds window_close",
+                customer.id
+            ));
+        }
+        if customer.service_time < 0 {
+            return Err(format!(
+                "customer '{}' service_time must be non-negative",
+                customer.id
+            ));
+        }
+        scaled_time(customer.window_open, "customer window_open")?;
+        scaled_time(customer.window_close, "customer window_close")?;
+        scaled_time(customer.service_time, "customer service_time")?;
+    }
+
+    Ok(())
+}
+
+fn scaled_time(value: i64, label: &'static str) -> Result<i64, String> {
+    value
+        .checked_mul(SCALE)
+        .ok_or_else(|| format!("{label} overflows scaled i64 time"))
+}
+
+fn empty_plan(req: &VrptwRequest, status: &str, wall_time_seconds: f64) -> VrptwPlan {
+    VrptwPlan {
+        request_id: req.id.clone(),
+        route: Vec::new(),
+        customers_total: req.customers.len(),
+        customers_visited: 0,
+        total_distance: 0.0,
+        return_time: 0,
+        solver: "cp-sat-v9.15".to_string(),
+        solver_identity: vrptw_cpsat_identity(req),
+        status: status.to_string(),
+        wall_time_seconds,
+    }
+}
+
+fn vrptw_cpsat_identity(req: &VrptwRequest) -> ExecutionIdentity {
+    cp_sat_solver_identity(format!(
+        "time_limit_seconds={}; search_workers=hardware_concurrency; objective=maximize_customers_visited; distance_scale={SCALE}",
+        req.time_limit_seconds
+    ))
 }
 
 #[cfg(test)]
@@ -378,6 +455,7 @@ mod tests {
     use super::*;
     use crate::test_support::MockContext;
     use crate::vrptw::problem::{Customer, Depot};
+    use converge_pack::TextPayload;
 
     fn customer(id: usize, x: f64, y: f64, open: i64, close: i64) -> Customer {
         Customer {
@@ -418,6 +496,13 @@ mod tests {
         );
         let plan = solve_cpsat_vrptw(&r);
         assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.solver_identity.backend, "cp-sat-v9.15");
+        assert!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .is_some_and(|native| native.backend.contains("OR-Tools"))
+        );
         assert_eq!(plan.customers_visited, 3);
         assert!(plan.return_time > 0);
         assert!(plan.total_distance > 0.0);
@@ -440,11 +525,18 @@ mod tests {
         assert!(plan.customers_visited <= 1);
     }
 
+    #[test]
+    fn rejects_invalid_time_window_without_panic() {
+        let r = req(vec![customer(1, 1.0, 0.0, 50, 10)], 200, 5.0);
+        let plan = solve_cpsat_vrptw(&r);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.route.is_empty());
+    }
+
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let r = req(vec![customer(1, 1.0, 0.0, 0, 50)], 200, 1.0);
-        let body = serde_json::to_string(&r).unwrap();
-        let ctx = MockContext::empty().with_seed("vrptw-request:v", &body);
+        let ctx = MockContext::empty().with_seed("vrptw-request:v", r);
         let s = CpSatVrptwSuggestor;
         assert_eq!(s.name(), "CpSatVrptwSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -457,10 +549,9 @@ mod tests {
     #[tokio::test]
     async fn suggestor_skips_when_plan_present() {
         let r = req(vec![customer(1, 1.0, 0.0, 0, 50)], 200, 1.0);
-        let body = serde_json::to_string(&r).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("vrptw-request:v", &body)
-            .with_strategy("vrptw-plan-cpsat:v", "{}");
+            .with_seed("vrptw-request:v", r)
+            .with_strategy("vrptw-plan-cpsat:v", TextPayload::new("existing"));
         let s = CpSatVrptwSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -469,7 +560,8 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("vrptw-request:bad", "not json");
+        let ctx = MockContext::empty()
+            .with_seed("vrptw-request:bad", TextPayload::new("not a vrptw request"));
         let s = CpSatVrptwSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

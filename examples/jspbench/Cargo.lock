@@ -41,8 +41,6 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 [[package]]
 name = "converge-core"
 version = "3.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b52a5fecdd3f685ec9e0e99a420903b6af17a46a525f5c553d12df33d3ebd63"
 dependencies = [
  "async-trait",
  "converge-pack",
@@ -59,14 +57,14 @@ dependencies = [
 
 [[package]]
 name = "converge-ferrox-ortools-sys"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "converge-ferrox-solver"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "converge-ferrox-ortools-sys",
@@ -82,8 +80,6 @@ dependencies = [
 [[package]]
 name = "converge-model"
 version = "3.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d52ed1171a993d8b3adab26e2d59e6cadbb5ebb23a774fe8701f258eca2ec13"
 dependencies = [
  "converge-core",
  "converge-pack",
@@ -94,8 +90,6 @@ dependencies = [
 [[package]]
 name = "converge-pack"
 version = "3.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "450f5a5dc386601a1b15ab388ded3da5f7464cfe2c35a9409a50b178be8e23ff"
 dependencies = [
  "async-trait",
  "hex",
@@ -108,8 +102,6 @@ dependencies = [
 [[package]]
 name = "converge-provider"
 version = "3.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b05bf2db634d5dacc83f90590d7dc3c85e70c67f01942fa45d52699475a8e4d1"
 dependencies = [
  "serde",
  "serde_json",
@@ -208,7 +200,6 @@ dependencies = [
  "converge-core",
  "converge-ferrox-solver",
  "converge-pack",
- "serde_json",
  "tokio",
 ]
 

@@ -1,11 +1,12 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, ExecutionIdentity, Suggestor};
 use ferrox_highs_sys::HighsModelStatus;
-use ferrox_highs_sys::safe::HighsSolver;
+use ferrox_highs_sys::safe::{HighsError, HighsSolver};
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::highs_solver_identity;
 
 use super::problem::{MipPlan, MipRequest, MipTerm, VarKind};
 
@@ -54,9 +55,9 @@ impl Suggestor for HighsMipSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<MipRequest>(fact.content()) {
+            match fact.require_payload::<MipRequest>() {
                 Ok(req) => {
-                    let plan = solve_mip(&req);
+                    let plan = solve_mip(req);
                     let confidence = match plan.status.as_str() {
                         "optimal" => 1.0,
                         "feasible" => 0.6 + (1.0 - plan.mip_gap.min(1.0)) * 0.3,
@@ -67,13 +68,13 @@ impl Suggestor for HighsMipSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{}", plan.request_id),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed mip-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected mip-request payload");
                 }
             }
         }
@@ -125,22 +126,28 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
     }
 
     // Add columns
-    let col_indices: Vec<i32> = req
-        .variables
-        .iter()
-        .enumerate()
-        .map(|(i, var)| match var.kind {
-            VarKind::Continuous => solver.add_col(costs[i], var.lb, var.ub),
-            VarKind::Integer => solver.add_int_col(costs[i], var.lb, var.ub),
-            VarKind::Binary => solver.add_bin_col(costs[i]),
-        })
-        .collect();
-
-    if let Some(tl) = req.time_limit_seconds {
-        solver.set_time_limit(tl);
+    let mut col_indices = Vec::with_capacity(req.variables.len());
+    for (i, var) in req.variables.iter().enumerate() {
+        let col = match var.kind {
+            VarKind::Continuous => solver.try_add_col(costs[i], var.lb, var.ub),
+            VarKind::Integer => solver.try_add_int_col(costs[i], var.lb, var.ub),
+            VarKind::Binary => solver.try_add_bin_col(costs[i]),
+        };
+        match col {
+            Ok(col) => col_indices.push(col),
+            Err(err) => return solver_error_plan(req, &err),
+        }
     }
-    if let Some(gap) = req.mip_gap_tolerance {
-        solver.set_mip_rel_gap(gap);
+
+    if let Some(tl) = req.time_limit_seconds
+        && let Err(err) = solver.try_set_time_limit(tl)
+    {
+        return solver_error_plan(req, &err);
+    }
+    if let Some(gap) = req.mip_gap_tolerance
+        && let Err(err) = solver.try_set_mip_rel_gap(gap)
+    {
+        return solver_error_plan(req, &err);
     }
 
     // Add rows
@@ -153,28 +160,43 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
                 vals.push(term.coeff);
             }
         }
-        solver.add_row(con.lb, con.ub, &indices, &vals);
+        if let Err(err) = solver.try_add_row(con.lb, con.ub, &indices, &vals) {
+            return solver_error_plan(req, &err);
+        }
     }
 
-    let status = solver.run();
+    let status = match solver.try_run() {
+        Ok(status) => status,
+        Err(err) => return solver_error_plan(req, &err),
+    };
+    let has_solution = solver.has_solution();
 
     let status_str = match status {
         HighsModelStatus::Optimal => "optimal",
-        HighsModelStatus::SolutionLimit | HighsModelStatus::TimeLimit => "feasible",
+        HighsModelStatus::SolutionLimit | HighsModelStatus::TimeLimit if has_solution => "feasible",
+        HighsModelStatus::TimeLimit => "timeout",
         HighsModelStatus::Infeasible => "infeasible",
         HighsModelStatus::Unbounded => "unbounded",
         _ => "error",
     };
 
-    let (values, objective_value, mip_gap) = if status.is_success() {
-        let vals: Vec<(String, f64)> = req
-            .variables
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (v.name.clone(), solver.col_value(col_indices[i])))
-            .collect();
+    let solution_usable = status.is_optimal()
+        || (status.may_have_incumbent() && has_solution && status_str == "feasible");
+
+    let (values, objective_value, mip_gap) = if solution_usable {
+        let mut vals = Vec::with_capacity(req.variables.len());
+        for (i, v) in req.variables.iter().enumerate() {
+            let value = match solver.try_col_value(col_indices[i]) {
+                Ok(value) => value,
+                Err(err) => return solver_error_plan(req, &err),
+            };
+            vals.push((v.name.clone(), value));
+        }
         let obj = solver.objective_value() * sign;
-        let gap = solver.mip_gap();
+        let gap = match solver.try_mip_gap() {
+            Ok(gap) => gap,
+            Err(err) => return solver_error_plan(req, &err),
+        };
         (vals, obj, gap)
     } else {
         (vec![], 0.0, f64::INFINITY)
@@ -187,6 +209,7 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
         objective_value,
         mip_gap,
         solver: "highs-v1.14.0".to_string(),
+        solver_identity: mip_identity(req),
     }
 }
 
@@ -198,7 +221,34 @@ fn invalid_plan(req: &MipRequest) -> MipPlan {
         objective_value: 0.0,
         mip_gap: f64::INFINITY,
         solver: "highs-v1.14.0".to_string(),
+        solver_identity: mip_identity(req),
     }
+}
+
+fn solver_error_plan(req: &MipRequest, err: &HighsError) -> MipPlan {
+    warn!(request_id = %req.id, error = %err, "mip solver failed");
+    MipPlan {
+        request_id: req.id.clone(),
+        status: "error".to_string(),
+        values: Vec::new(),
+        objective_value: 0.0,
+        mip_gap: f64::INFINITY,
+        solver: "highs-v1.14.0".to_string(),
+        solver_identity: mip_identity(req),
+    }
+}
+
+fn mip_identity(req: &MipRequest) -> ExecutionIdentity {
+    let time_limit = req
+        .time_limit_seconds
+        .map_or_else(|| "none".to_string(), |limit| limit.to_string());
+    let mip_gap_tolerance = req
+        .mip_gap_tolerance
+        .map_or_else(|| "none".to_string(), |gap| gap.to_string());
+    highs_solver_identity(format!(
+        "time_limit_seconds={time_limit}; mip_gap_tolerance={mip_gap_tolerance}; maximize={}",
+        req.objective.maximize
+    ))
 }
 
 fn validate_mip_request(req: &MipRequest) -> Result<(), String> {
@@ -210,6 +260,8 @@ fn validate_mip_request(req: &MipRequest) -> Result<(), String> {
         if !vars.insert(var.name.as_str()) {
             return Err(format!("duplicate variable '{}'", var.name));
         }
+        validate_bound(var.lb, "variable lower bound")?;
+        validate_bound(var.ub, "variable upper bound")?;
         if var.lb > var.ub {
             return Err(format!("variable '{}' has lb > ub", var.name));
         }
@@ -218,10 +270,23 @@ fn validate_mip_request(req: &MipRequest) -> Result<(), String> {
     validate_mip_terms(&req.objective.terms, &vars, "objective")?;
 
     for constraint in &req.constraints {
+        validate_bound(constraint.lb, "constraint lower bound")?;
+        validate_bound(constraint.ub, "constraint upper bound")?;
         if constraint.lb > constraint.ub {
             return Err(format!("constraint '{}' has lb > ub", constraint.name));
         }
         validate_mip_terms(&constraint.terms, &vars, "constraint")?;
+    }
+
+    if let Some(time_limit) = req.time_limit_seconds
+        && (!time_limit.is_finite() || time_limit <= 0.0)
+    {
+        return Err("time_limit_seconds must be finite and > 0".to_string());
+    }
+    if let Some(gap) = req.mip_gap_tolerance
+        && (!gap.is_finite() || gap < 0.0)
+    {
+        return Err("mip_gap_tolerance must be finite and >= 0".to_string());
     }
 
     Ok(())
@@ -239,8 +304,22 @@ fn validate_mip_terms(
                 term.var
             ));
         }
+        if !term.coeff.is_finite() {
+            return Err(format!(
+                "{label} term for '{}' has non-finite coefficient",
+                term.var
+            ));
+        }
     }
     Ok(())
+}
+
+fn validate_bound(value: f64, label: &'static str) -> Result<(), String> {
+    if value.is_nan() {
+        Err(format!("{label} must not be NaN"))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +332,7 @@ mod tests {
     use super::*;
     use crate::mip::problem::{MipConstraint, MipObjective, MipTerm, MipVariable, VarKind};
     use crate::test_support::MockContext;
+    use converge_pack::TextPayload;
 
     fn binary(name: &str) -> MipVariable {
         MipVariable {
@@ -307,6 +387,14 @@ mod tests {
         let req = knapsack(4, 10.0, &[2.0, 3.0, 4.0, 5.0], &[3.0, 4.0, 5.0, 6.0]);
         let plan = solve_mip(&req);
         assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.solver_identity.backend, "highs-v1.14.0");
+        assert_eq!(
+            plan.solver_identity
+                .native_identity
+                .as_ref()
+                .map(|native| native.backend.as_str()),
+            Some("HiGHS")
+        );
         assert!(plan.objective_value > 0.0);
         assert_eq!(plan.values.len(), 4);
     }
@@ -431,6 +519,38 @@ mod tests {
     }
 
     #[test]
+    fn rejects_non_finite_coefficients_as_invalid() {
+        let req = MipRequest {
+            id: "bad-coeff".into(),
+            variables: vec![binary("x")],
+            constraints: vec![],
+            objective: MipObjective {
+                terms: vec![term("x", f64::NAN)],
+                maximize: true,
+            },
+            time_limit_seconds: Some(1.0),
+            mip_gap_tolerance: None,
+        };
+
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "invalid");
+        assert!(plan.values.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_solver_options_as_invalid() {
+        let mut req = knapsack(1, 1.0, &[1.0], &[1.0]);
+        req.time_limit_seconds = Some(0.0);
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "invalid");
+
+        let mut req = knapsack(1, 1.0, &[1.0], &[1.0]);
+        req.mip_gap_tolerance = Some(f64::NAN);
+        let plan = solve_mip(&req);
+        assert_eq!(plan.status, "invalid");
+    }
+
+    #[test]
     fn minimize_path() {
         // min x s.t. x >= 3, x in [0,10]; optimal x=3, obj=3.
         let req = MipRequest {
@@ -457,8 +577,7 @@ mod tests {
     #[tokio::test]
     async fn suggestor_emits_proposal() {
         let req = knapsack(3, 5.0, &[1.0, 2.0, 3.0], &[5.0, 4.0, 3.0]);
-        let body = serde_json::to_string(&req).unwrap();
-        let ctx = MockContext::empty().with_seed("mip-request:kp", &body);
+        let ctx = MockContext::empty().with_seed("mip-request:kp", req);
         let s = HighsMipSuggestor;
         assert_eq!(s.name(), "HighsMipSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -471,10 +590,9 @@ mod tests {
     #[tokio::test]
     async fn suggestor_skips_when_plan_present() {
         let req = knapsack(2, 5.0, &[1.0, 2.0], &[5.0, 4.0]);
-        let body = serde_json::to_string(&req).unwrap();
         let ctx = MockContext::empty()
-            .with_seed("mip-request:kp", &body)
-            .with_strategy("mip-plan:kp", "{}");
+            .with_seed("mip-request:kp", req)
+            .with_strategy("mip-plan:kp", TextPayload::new("existing"));
         let s = HighsMipSuggestor;
         assert!(!s.accepts(&ctx));
         let eff = s.execute(&ctx).await;
@@ -483,7 +601,8 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed("mip-request:bad", "not json");
+        let ctx = MockContext::empty()
+            .with_seed("mip-request:bad", TextPayload::new("not a mip request"));
         let s = HighsMipSuggestor;
         let eff = s.execute(&ctx).await;
         assert_eq!(eff.proposals().len(), 0);

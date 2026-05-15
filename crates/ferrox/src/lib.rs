@@ -1,6 +1,7 @@
 pub mod error;
 pub mod provenance;
 pub(crate) mod serde_util;
+pub mod solver_identity;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -22,5 +23,6 @@ pub mod jobshop;
 pub mod scheduling;
 pub mod vrptw;
 
+pub use converge_pack::ExecutionIdentity;
 pub use error::{FerroxError, Result};
 pub use provenance::{FERROX_PROVENANCE, ProvenanceSource, UnknownProvenanceSource};

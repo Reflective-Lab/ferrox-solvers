@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use converge_pack::{ContentHash, Timestamp};
+use converge_pack::{ContentHash, FactPayload, Timestamp};
 use converge_pack::{
     Context, ContextFact, ContextKey, FactActor, FactActorKind, FactLocalTrace,
     FactPromotionRecord, FactTraceLink, FactValidationSummary,
@@ -18,19 +18,19 @@ impl MockContext {
         }
     }
 
-    pub fn with_seed(mut self, id: &str, content: &str) -> Self {
+    pub fn with_seed(mut self, id: &str, payload: impl FactPayload + PartialEq) -> Self {
         self.facts
             .entry(ContextKey::Seeds)
             .or_default()
-            .push(seed_fact(id, content));
+            .push(seed_fact(id, payload));
         self
     }
 
-    pub fn with_strategy(mut self, id: &str, content: &str) -> Self {
+    pub fn with_strategy(mut self, id: &str, payload: impl FactPayload + PartialEq) -> Self {
         self.facts
             .entry(ContextKey::Strategies)
             .or_default()
-            .push(strategy_fact(id, content));
+            .push(strategy_fact(id, payload));
         self
     }
 }
@@ -45,19 +45,19 @@ impl Context for MockContext {
     }
 }
 
-pub fn seed_fact(id: &str, content: &str) -> ContextFact {
-    fact(ContextKey::Seeds, id, content)
+pub fn seed_fact(id: &str, payload: impl FactPayload + PartialEq) -> ContextFact {
+    fact(ContextKey::Seeds, id, payload)
 }
 
-pub fn strategy_fact(id: &str, content: &str) -> ContextFact {
-    fact(ContextKey::Strategies, id, content)
+pub fn strategy_fact(id: &str, payload: impl FactPayload + PartialEq) -> ContextFact {
+    fact(ContextKey::Strategies, id, payload)
 }
 
-fn fact(key: ContextKey, id: &str, content: &str) -> ContextFact {
+fn fact(key: ContextKey, id: &str, payload: impl FactPayload + PartialEq) -> ContextFact {
     ContextFact::new_projection(
         key,
         id,
-        content,
+        payload,
         FactPromotionRecord::new_projection(
             "projection-test",
             ContentHash::zero(),

@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+use converge_pack::{ExecutionIdentity, FactPayload};
+
 /// An agent that can execute tasks requiring one of its declared capabilities.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchedulingAgent {
     pub id: usize,
     pub name: String,
@@ -10,7 +13,8 @@ pub struct SchedulingAgent {
 }
 
 /// A unit of work to be scheduled.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchedulingTask {
     pub id: usize,
     pub name: String,
@@ -25,7 +29,8 @@ pub struct SchedulingTask {
 }
 
 /// Seeded into `ContextKey::Seeds` with id prefix `"scheduling-request:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchedulingRequest {
     pub id: String,
     pub agents: Vec<SchedulingAgent>,
@@ -37,12 +42,18 @@ pub struct SchedulingRequest {
     pub time_limit_seconds: f64,
 }
 
+impl FactPayload for SchedulingRequest {
+    const FAMILY: &'static str = "ferrox.scheduling.request";
+    const VERSION: u16 = 1;
+}
+
 fn default_time_limit() -> f64 {
     30.0
 }
 
 /// A single task-to-agent assignment with resolved timing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TaskAssignment {
     pub task_id: usize,
     pub task_name: String,
@@ -53,7 +64,8 @@ pub struct TaskAssignment {
 }
 
 /// Written to `ContextKey::Strategies` with id prefix `"scheduling-plan-<solver>:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchedulingPlan {
     pub request_id: String,
     pub assignments: Vec<TaskAssignment>,
@@ -63,9 +75,15 @@ pub struct SchedulingPlan {
     pub makespan_min: i64,
     /// Short identifier for the algorithm that produced this plan.
     pub solver: String,
+    pub solver_identity: ExecutionIdentity,
     /// `"optimal"`, `"feasible"`, `"infeasible"`, or `"error"`.
     pub status: String,
     pub wall_time_seconds: f64,
+}
+
+impl FactPayload for SchedulingPlan {
+    const FAMILY: &'static str = "ferrox.scheduling.plan";
+    const VERSION: u16 = 1;
 }
 
 impl SchedulingPlan {
@@ -82,6 +100,7 @@ impl SchedulingPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver_identity::non_native_solver_identity;
 
     fn empty_plan(tasks_total: usize, tasks_scheduled: usize) -> SchedulingPlan {
         SchedulingPlan {
@@ -91,6 +110,7 @@ mod tests {
             tasks_scheduled,
             makespan_min: 0,
             solver: "x".into(),
+            solver_identity: non_native_solver_identity("x", "test"),
             status: "feasible".into(),
             wall_time_seconds: 0.0,
         }

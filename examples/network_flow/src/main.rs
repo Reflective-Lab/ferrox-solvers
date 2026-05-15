@@ -1,7 +1,7 @@
 //! Demonstrates MinCostFlowSuggestor with a small supply-chain network.
 
 use converge_core::{ContextState, Engine};
-use converge_pack::ContextKey;
+use converge_pack::{ContextKey, ProposedFact};
 use ferrox::network_flow::{
     FlowArc, FlowSolveMode, MinCostFlowPlan, MinCostFlowRequest, MinCostFlowSuggestor, NodeSupply,
 };
@@ -30,22 +30,23 @@ async fn main() {
     };
 
     let mut ctx = ContextState::new();
-    ctx.add_input(
+    ctx.add_proposal(ProposedFact::new(
         ContextKey::Seeds,
         "network-flow-request:warehouse-flow",
-        &serde_json::to_string(&request).unwrap(),
-    )
+        request,
+        "network-flow-example",
+    ))
     .unwrap();
 
     let result = engine.run(ctx).await.unwrap();
-    let plans: Vec<_> = result
+    let plans: Vec<&MinCostFlowPlan> = result
         .context
         .get(ContextKey::Strategies)
         .iter()
-        .filter_map(|f| serde_json::from_str::<MinCostFlowPlan>(f.content()).ok())
+        .filter_map(|f| f.payload::<MinCostFlowPlan>())
         .collect();
 
-    for plan in &plans {
+    for plan in plans {
         println!("Status: {}", plan.status);
         println!("Solver: {}", plan.solver);
         println!("Cost:   {}", plan.optimal_cost);

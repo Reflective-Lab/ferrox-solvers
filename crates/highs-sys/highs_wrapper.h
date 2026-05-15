@@ -38,6 +38,9 @@ HighsModelStatus   highs_get_model_status(HighsHandle* h);
 double             highs_get_objective_value(HighsHandle* h);
 double             highs_get_col_value(HighsHandle* h, int col);
 double             highs_get_mip_gap(HighsHandle* h);
+HighsReturnStatus  highs_get_col_value_checked(HighsHandle* h, int col, double* out);
+HighsReturnStatus  highs_get_mip_gap_checked(HighsHandle* h, double* out);
+int                highs_solution_value_valid(HighsHandle* h);
 
 #ifdef __cplusplus
 }

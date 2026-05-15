@@ -17,6 +17,20 @@ message StringI64 {
   int64  value = 2;
 }
 
+message SolverIdentity {
+  string solver                 = 1;
+  string native_backend         = 2;
+  string native_version         = 3;
+  string native_source_url      = 4;
+  string native_expected_commit = 5;
+  string native_actual_commit   = 6;
+  string native_source_mode     = 7;
+  string build_config           = 8;
+  string runtime_config         = 9;
+  string rust_crate             = 10;
+  string rust_crate_version     = 11;
+}
+
 // ─── CP-SAT ──────────────────────────────────────────────────────────────────
 
 message CpVariable {
@@ -138,6 +152,7 @@ message SolveCpResponse {
   optional int64     objective_value   = 4;
   double             wall_time_seconds = 5;
   string             solver            = 6;
+  SolverIdentity     solver_identity   = 7;
 }
 
 // ─── LP (GLOP) ───────────────────────────────────────────────────────────────
@@ -179,6 +194,7 @@ message SolveLpResponse {
   repeated StringF64 values          = 3;
   double             objective_value = 4;
   string             solver          = 5;
+  SolverIdentity     solver_identity = 6;
 }
 
 // ─── MIP (HiGHS) ─────────────────────────────────────────────────────────────
@@ -229,6 +245,7 @@ message SolveMipResponse {
   double             objective_value = 4;
   double             mip_gap         = 5;
   string             solver          = 6;
+  SolverIdentity     solver_identity = 7;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────

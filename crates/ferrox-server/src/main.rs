@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| "0.0.0.0:50051".into())
         .parse()?;
 
-    let svc = FerroxSolverService;
+    let svc = FerroxSolverService::default();
 
     let cert_path = std::env::var("FERROX_TLS_CERT").unwrap_or_else(|_| "/tls/server.crt".into());
     let key_path = std::env::var("FERROX_TLS_KEY").unwrap_or_else(|_| "/tls/server.key".into());

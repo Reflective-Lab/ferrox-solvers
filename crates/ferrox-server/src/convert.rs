@@ -12,6 +12,46 @@ use tonic::Status;
 
 use crate::proto::ferrox::v1 as p;
 
+fn solver_identity_to_proto(identity: ferrox::ExecutionIdentity) -> p::SolverIdentity {
+    let native_identity = identity.native_identity.as_ref();
+    let native_backend =
+        native_identity.map_or_else(|| "none".to_string(), |native| native.backend.clone());
+    let native_version = native_identity.map_or_else(
+        || identity.backend_version.clone(),
+        |native| native.version.clone(),
+    );
+    let native_source_url = native_identity.map_or_else(
+        || "not_applicable".to_string(),
+        |native| native.source_url.clone(),
+    );
+    let native_expected_commit = native_identity.map_or_else(
+        || "not_applicable".to_string(),
+        |native| native.expected_commit.clone(),
+    );
+    let native_actual_commit = native_identity.map_or_else(
+        || "not_applicable".to_string(),
+        |native| native.actual_commit.clone(),
+    );
+    let native_source_mode = native_identity.map_or_else(
+        || "not_applicable".to_string(),
+        |native| native.source_mode.clone(),
+    );
+
+    p::SolverIdentity {
+        solver: identity.backend,
+        native_backend,
+        native_version,
+        native_source_url,
+        native_expected_commit,
+        native_actual_commit,
+        native_source_mode,
+        build_config: identity.build_identity,
+        runtime_config: identity.runtime_config,
+        rust_crate: identity.producer.name,
+        rust_crate_version: identity.producer.version,
+    }
+}
+
 // ─── CP-SAT ──────────────────────────────────────────────────────────────────
 
 pub fn cp_req_from_proto(r: p::SolveCpRequest) -> Result<CpSatRequest, Status> {
@@ -186,6 +226,7 @@ pub fn cp_resp_to_proto(p: CpSatPlan) -> p::SolveCpResponse {
         objective_value: p.objective_value,
         wall_time_seconds: p.wall_time_seconds,
         solver: p.solver,
+        solver_identity: Some(solver_identity_to_proto(p.solver_identity)),
     }
 }
 
@@ -250,6 +291,7 @@ pub fn lp_resp_to_proto(p: LpPlan) -> p::SolveLpResponse {
             .collect(),
         objective_value: p.objective_value,
         solver: p.solver,
+        solver_identity: Some(solver_identity_to_proto(p.solver_identity)),
     }
 }
 
@@ -260,22 +302,34 @@ pub fn mip_req_from_proto(r: p::SolveMipRequest) -> Result<MipRequest, Status> {
         .objective
         .ok_or_else(|| Status::invalid_argument("missing MipObjective"))?;
 
-    Ok(MipRequest {
-        id: r.id,
-        variables: r
-            .variables
-            .into_iter()
-            .map(|v| MipVariable {
+    let variables = r
+        .variables
+        .into_iter()
+        .map(|v| {
+            let kind = match v.kind {
+                0 => VarKind::Continuous,
+                1 => VarKind::Integer,
+                2 => VarKind::Binary,
+                other => {
+                    return Err(Status::invalid_argument(format!(
+                        "unknown MipVariable.kind {other} for '{}'",
+                        v.name
+                    )));
+                }
+            };
+
+            Ok(MipVariable {
                 name: v.name,
                 lb: v.lb,
                 ub: v.ub,
-                kind: match v.kind {
-                    1 => VarKind::Integer,
-                    2 => VarKind::Binary,
-                    _ => VarKind::Continuous,
-                },
+                kind,
             })
-            .collect(),
+        })
+        .collect::<Result<Vec<_>, Status>>()?;
+
+    Ok(MipRequest {
+        id: r.id,
+        variables,
         constraints: r
             .constraints
             .into_iter()
@@ -321,6 +375,7 @@ pub fn mip_resp_to_proto(p: MipPlan) -> p::SolveMipResponse {
         objective_value: p.objective_value,
         mip_gap: p.mip_gap,
         solver: p.solver,
+        solver_identity: Some(solver_identity_to_proto(p.solver_identity)),
     }
 }
 
@@ -622,6 +677,10 @@ mod tests {
             objective_value: Some(10),
             wall_time_seconds: 0.5,
             solver: "cp-sat-v9.15".into(),
+            solver_identity: ferrox::solver_identity::non_native_solver_identity(
+                "cp-sat-v9.15",
+                "test",
+            ),
         };
         let resp = cp_resp_to_proto(plan);
         assert_eq!(resp.request_id, "r");
@@ -632,6 +691,7 @@ mod tests {
         assert_eq!(resp.objective_value, Some(10));
         assert_eq!(resp.wall_time_seconds, 0.5);
         assert_eq!(resp.solver, "cp-sat-v9.15");
+        assert_eq!(resp.solver_identity.unwrap().solver, "cp-sat-v9.15");
     }
 
     // ─── LP ──────────────────────────────────────────────────────────────────
@@ -690,6 +750,7 @@ mod tests {
             values: vec![("x".into(), 1.5)],
             objective_value: 3.0,
             solver: "glop".into(),
+            solver_identity: ferrox::solver_identity::non_native_solver_identity("glop", "test"),
         };
         let resp = lp_resp_to_proto(plan);
         assert_eq!(resp.values.len(), 1);
@@ -697,6 +758,7 @@ mod tests {
         assert_eq!(resp.values[0].value, 1.5);
         assert_eq!(resp.objective_value, 3.0);
         assert_eq!(resp.solver, "glop");
+        assert_eq!(resp.solver_identity.unwrap().solver, "glop");
     }
 
     // ─── MIP ─────────────────────────────────────────────────────────────────
@@ -725,12 +787,6 @@ mod tests {
                     ub: 1.0,
                     kind: 2,
                 },
-                p::MipVariable {
-                    name: "u".into(),
-                    lb: 0.0,
-                    ub: 1.0,
-                    kind: 99, // unknown: continuous fallback
-                },
             ],
             constraints: vec![p::MipConstraint {
                 name: "c1".into(),
@@ -749,9 +805,31 @@ mod tests {
         assert!(matches!(out.variables[0].kind, VarKind::Continuous));
         assert!(matches!(out.variables[1].kind, VarKind::Integer));
         assert!(matches!(out.variables[2].kind, VarKind::Binary));
-        assert!(matches!(out.variables[3].kind, VarKind::Continuous));
         assert!(!out.objective.maximize);
         assert_eq!(out.mip_gap_tolerance, Some(0.01));
+    }
+
+    #[test]
+    fn mip_request_unknown_var_kind_rejected() {
+        let req = p::SolveMipRequest {
+            id: "mip".into(),
+            variables: vec![p::MipVariable {
+                name: "x".into(),
+                lb: 0.0,
+                ub: 1.0,
+                kind: 99,
+            }],
+            constraints: vec![],
+            objective: Some(p::MipObjective {
+                terms: vec![mip_term("x", 1.0)],
+                maximize: false,
+            }),
+            time_limit_seconds: None,
+            mip_gap_tolerance: None,
+        };
+
+        let err = mip_req_from_proto(req).expect_err("unknown kind must fail closed");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 
     #[test]
@@ -777,11 +855,13 @@ mod tests {
             objective_value: 7.0,
             mip_gap: 0.05,
             solver: "highs".into(),
+            solver_identity: ferrox::solver_identity::non_native_solver_identity("highs", "test"),
         };
         let resp = mip_resp_to_proto(plan);
         assert_eq!(resp.values.len(), 2);
         assert_eq!(resp.objective_value, 7.0);
         assert_eq!(resp.mip_gap, 0.05);
         assert_eq!(resp.solver, "highs");
+        assert_eq!(resp.solver_identity.unwrap().solver, "highs");
     }
 }

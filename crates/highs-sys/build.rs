@@ -2,6 +2,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=highs_wrapper.h");
     println!("cargo:rerun-if-changed=highs_wrapper.cc");
+    println!("cargo:rerun-if-env-changed=FERROX_HIGHS_ROOT");
 
     if std::env::var("CARGO_FEATURE_LINK").is_ok() {
         build_with_highs();
@@ -15,10 +16,18 @@ fn build_with_highs() {
     let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    let highs_build = env::var("FERROX_HIGHS_ROOT")
-        .map_or_else(|_| workspace_root.join("vendor/highs/build"), PathBuf::from);
+    let external_root = env::var("FERROX_HIGHS_ROOT").ok();
+    let highs_build = external_root
+        .as_deref()
+        .map_or_else(|| workspace_root.join("vendor/highs/build"), PathBuf::from);
 
     let highs_src = highs_build.parent().unwrap().to_path_buf();
+    emit_identity_metadata(
+        external_root.is_some(),
+        &highs_src,
+        "FERROX_HIGHS_SOURCE_MODE",
+        "FERROX_HIGHS_SOURCE_COMMIT",
+    );
 
     assert!(
         highs_build.exists(),
@@ -70,4 +79,36 @@ fn copy_runtime_libraries(lib_dir: &std::path::Path, out_dir: &std::path::Path) 
             let _ = std::fs::copy(&path, out_dir.join(name));
         }
     }
+}
+
+fn emit_identity_metadata(
+    external_root: bool,
+    source_dir: &std::path::Path,
+    mode_env: &str,
+    commit_env: &str,
+) {
+    let source_mode = if external_root {
+        "external-root"
+    } else {
+        "vendored"
+    };
+    let source_commit = git_head(source_dir).unwrap_or_else(|| "unavailable".to_string());
+    println!("cargo:rustc-env={mode_env}={source_mode}");
+    println!("cargo:rustc-env={commit_env}={source_commit}");
+}
+
+fn git_head(source_dir: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(source_dir)
+        .arg("rev-parse")
+        .arg("HEAD")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let commit = String::from_utf8(output.stdout).ok()?;
+    let commit = commit.trim();
+    (!commit.is_empty()).then(|| commit.to_string())
 }

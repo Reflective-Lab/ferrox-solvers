@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use converge_pack::{ExecutionIdentity, FactPayload};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowSolveMode {
@@ -10,7 +12,8 @@ pub enum FlowSolveMode {
     MaxFlowMinCost,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FlowArc {
     pub name: String,
     pub tail: i32,
@@ -19,14 +22,16 @@ pub struct FlowArc {
     pub unit_cost: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NodeSupply {
     pub node: i32,
     pub supply: i64,
 }
 
 /// Seeded into `ContextKey::Seeds` with id prefix `"network-flow-request:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MinCostFlowRequest {
     pub id: String,
     pub arcs: Vec<FlowArc>,
@@ -35,7 +40,13 @@ pub struct MinCostFlowRequest {
     pub mode: FlowSolveMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl FactPayload for MinCostFlowRequest {
+    const FAMILY: &'static str = "ferrox.network_flow.request";
+    const VERSION: u16 = 1;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FlowArcPlan {
     pub name: String,
     pub tail: i32,
@@ -46,7 +57,8 @@ pub struct FlowArcPlan {
 }
 
 /// Written to `ContextKey::Strategies` with id prefix `"network-flow-plan-ortools:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MinCostFlowPlan {
     pub request_id: String,
     pub status: String,
@@ -57,4 +69,10 @@ pub struct MinCostFlowPlan {
     pub fulfilled_flow: i64,
     pub fulfillment_ratio: f64,
     pub solver: String,
+    pub solver_identity: ExecutionIdentity,
+}
+
+impl FactPayload for MinCostFlowPlan {
+    const FAMILY: &'static str = "ferrox.network_flow.plan";
+    const VERSION: u16 = 1;
 }

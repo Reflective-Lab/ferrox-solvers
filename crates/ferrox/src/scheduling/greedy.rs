@@ -4,6 +4,7 @@ use std::time::Instant;
 use tracing::warn;
 
 use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::solver_identity::non_native_solver_identity;
 
 use super::problem::{SchedulingPlan, SchedulingRequest, TaskAssignment};
 
@@ -64,9 +65,9 @@ impl Suggestor for GreedySchedulerSuggestor {
                 continue;
             }
 
-            match serde_json::from_str::<SchedulingRequest>(fact.content()) {
+            match fact.require_payload::<SchedulingRequest>() {
                 Ok(req) => {
-                    let plan = solve_greedy(&req);
+                    let plan = solve_greedy(req);
                     // Greedy is fast but can't prove optimality — cap confidence at 0.65.
                     let confidence = (plan.throughput_ratio() * 0.65).min(0.65);
                     proposals.push(
@@ -74,13 +75,13 @@ impl Suggestor for GreedySchedulerSuggestor {
                             .proposed_fact(
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
-                                serde_json::to_string(&plan).unwrap_or_default(),
+                                plan,
                             )
                             .with_confidence(confidence),
                     );
                 }
                 Err(e) => {
-                    warn!(id = %fact.id(), error = %e, "malformed scheduling-request");
+                    warn!(id = %fact.id(), error = %e, "unexpected scheduling-request payload");
                 }
             }
         }
@@ -152,6 +153,10 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
         tasks_scheduled: scheduled,
         makespan_min: makespan,
         solver: "greedy-edf".to_string(),
+        solver_identity: non_native_solver_identity(
+            "greedy-edf",
+            "algorithm=edf_earliest_available",
+        ),
         status: "feasible".to_string(),
         wall_time_seconds: t0.elapsed().as_secs_f64(),
     }
@@ -163,6 +168,7 @@ mod tests {
     use crate::scheduling::problem::{SchedulingAgent, SchedulingTask};
     use crate::test_support::MockContext;
     use converge_pack::Suggestor;
+    use converge_pack::TextPayload;
 
     fn agent(id: usize, name: &str, caps: &[&str]) -> SchedulingAgent {
         SchedulingAgent {
@@ -294,8 +300,7 @@ mod tests {
             vec![task(1, "t1", "py", 30, 0, 60)],
             vec![agent(0, "alice", &["py"])],
         );
-        let body = serde_json::to_string(&req).unwrap();
-        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}r1"), &body);
+        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}r1"), req);
         let s = GreedySchedulerSuggestor;
         assert_eq!(s.name(), "GreedySchedulerSuggestor");
         assert_eq!(s.dependencies(), &[ContextKey::Seeds]);
@@ -311,10 +316,9 @@ mod tests {
             vec![task(1, "t1", "py", 30, 0, 60)],
             vec![agent(0, "alice", &["py"])],
         );
-        let body = serde_json::to_string(&req).unwrap();
         let ctx = MockContext::empty()
-            .with_seed(&format!("{REQUEST_PREFIX}r1"), &body)
-            .with_strategy("scheduling-plan-greedy:r1", "{}");
+            .with_seed(&format!("{REQUEST_PREFIX}r1"), req)
+            .with_strategy("scheduling-plan-greedy:r1", TextPayload::new("existing"));
         let s = GreedySchedulerSuggestor;
         assert!(!s.accepts(&ctx));
         let effect = s.execute(&ctx).await;
@@ -323,7 +327,10 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_handles_malformed_seed() {
-        let ctx = MockContext::empty().with_seed(&format!("{REQUEST_PREFIX}bad"), "not json");
+        let ctx = MockContext::empty().with_seed(
+            &format!("{REQUEST_PREFIX}bad"),
+            TextPayload::new("not a scheduling request"),
+        );
         let s = GreedySchedulerSuggestor;
         let effect = s.execute(&ctx).await;
         assert_eq!(effect.proposals().len(), 0);
@@ -331,7 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn suggestor_ignores_other_seed_prefixes() {
-        let ctx = MockContext::empty().with_seed("unrelated:r1", "{}");
+        let ctx = MockContext::empty().with_seed("unrelated:r1", TextPayload::new("unrelated"));
         let s = GreedySchedulerSuggestor;
         assert!(!s.accepts(&ctx));
     }

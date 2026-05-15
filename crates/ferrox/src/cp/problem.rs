@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+use converge_pack::{ExecutionIdentity, FactPayload};
+
 /// A single integer variable in a CP-SAT model.
 /// Set `is_bool = true` for binary (0/1) variables that may serve as
 /// optional-interval literals; the solver treats them as `BoolVar` internally.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CpVariable {
     pub name: String,
     pub lb: i64,
@@ -13,7 +16,8 @@ pub struct CpVariable {
 }
 
 /// A fixed-duration interval variable.  The solver enforces `end == start + duration`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IntervalVarDef {
     pub name: String,
     pub start_var: String,
@@ -22,7 +26,8 @@ pub struct IntervalVarDef {
 }
 
 /// An optional interval that is active only when `lit_var` (a bool variable) equals 1.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OptionalIntervalVarDef {
     pub name: String,
     pub start_var: String,
@@ -32,7 +37,8 @@ pub struct OptionalIntervalVarDef {
 }
 
 /// One term in a linear expression.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CpTerm {
     pub var: String,
     pub coeff: i64,
@@ -41,7 +47,8 @@ pub struct CpTerm {
 /// A Boolean literal in a CP-SAT model.
 ///
 /// `negated = true` represents `not var`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CpBoolLiteral {
     pub var: String,
     #[serde(default)]
@@ -49,21 +56,23 @@ pub struct CpBoolLiteral {
 }
 
 /// One fixed-demand task in a cumulative resource constraint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CumulativeDemand {
     pub interval: String,
     pub demand: i64,
 }
 
 /// One rectangle in a two-dimensional no-overlap constraint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NoOverlap2DRectangle {
     pub x_interval: String,
     pub y_interval: String,
 }
 
 /// A constraint over variables.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConstraintKind {
     LinearLe {
@@ -127,7 +136,8 @@ pub enum ConstraintKind {
 }
 
 /// Seeded into `ContextKey::Seeds` with id prefix `"cpsat-request:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CpSatRequest {
     pub id: String,
     pub variables: Vec<CpVariable>,
@@ -141,8 +151,14 @@ pub struct CpSatRequest {
     pub time_limit_seconds: Option<f64>,
 }
 
+impl FactPayload for CpSatRequest {
+    const FAMILY: &'static str = "ferrox.cpsat.request";
+    const VERSION: u16 = 1;
+}
+
 /// Written to `ContextKey::Strategies` with id prefix `"cpsat-plan:"`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CpSatPlan {
     pub request_id: String,
     pub status: String,
@@ -150,4 +166,10 @@ pub struct CpSatPlan {
     pub objective_value: Option<i64>,
     pub wall_time_seconds: f64,
     pub solver: String,
+    pub solver_identity: ExecutionIdentity,
+}
+
+impl FactPayload for CpSatPlan {
+    const FAMILY: &'static str = "ferrox.cpsat.plan";
+    const VERSION: u16 = 1;
 }

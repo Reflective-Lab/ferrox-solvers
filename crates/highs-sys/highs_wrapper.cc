@@ -4,6 +4,7 @@
 // Integer constants must match highs_wrapper.h / lib.rs definitions.
 
 #include <cstdint>
+#include <cstddef>
 #include "Highs.h"
 
 // ── Integer return constants (must match highs_wrapper.h) ────────────────────
@@ -99,6 +100,27 @@ double highs_get_mip_gap(HighsHandle* h) {
     double val = 1.0;
     h->highs.getInfoValue("mip_gap", val);
     return val;
+}
+
+int32_t highs_get_col_value_checked(HighsHandle* h, int col, double* out) {
+    if (out == nullptr) return FX_kError;
+    const auto& values = h->highs.getSolution().col_value;
+    if (col < 0 || static_cast<size_t>(col) >= values.size()) return FX_kError;
+    *out = values[static_cast<size_t>(col)];
+    return FX_kOk;
+}
+
+int32_t highs_get_mip_gap_checked(HighsHandle* h, double* out) {
+    if (out == nullptr) return FX_kError;
+    double val = 1.0;
+    auto s = h->highs.getInfoValue("mip_gap", val);
+    if (s != HighsStatus::kOk) return FX_kError;
+    *out = val;
+    return FX_kOk;
+}
+
+int highs_solution_value_valid(HighsHandle* h) {
+    return h->highs.getSolution().value_valid ? 1 : 0;
 }
 
 } // extern "C"

@@ -2,6 +2,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=wrapper.cc");
+    println!("cargo:rerun-if-env-changed=FERROX_ORTOOLS_ROOT");
 
     if std::env::var("CARGO_FEATURE_LINK").is_ok() {
         build_with_ortools();
@@ -20,12 +21,19 @@ fn build_with_ortools() {
         .unwrap()
         .to_path_buf();
 
-    let ortools_build = env::var("FERROX_ORTOOLS_ROOT").map_or_else(
-        |_| workspace_root.join("vendor/ortools/build"),
+    let external_root = env::var("FERROX_ORTOOLS_ROOT").ok();
+    let ortools_build = external_root.as_deref().map_or_else(
+        || workspace_root.join("vendor/ortools/build"),
         PathBuf::from,
     );
 
     let ortools_src = ortools_build.parent().unwrap().to_path_buf();
+    emit_identity_metadata(
+        external_root.is_some(),
+        &ortools_src,
+        "FERROX_ORTOOLS_SOURCE_MODE",
+        "FERROX_ORTOOLS_SOURCE_COMMIT",
+    );
 
     assert!(
         ortools_build.exists(),
@@ -85,6 +93,38 @@ fn copy_runtime_libraries(lib_dir: &std::path::Path, out_dir: &std::path::Path) 
             let _ = std::fs::copy(&path, out_dir.join(name));
         }
     }
+}
+
+fn emit_identity_metadata(
+    external_root: bool,
+    source_dir: &std::path::Path,
+    mode_env: &str,
+    commit_env: &str,
+) {
+    let source_mode = if external_root {
+        "external-root"
+    } else {
+        "vendored"
+    };
+    let source_commit = git_head(source_dir).unwrap_or_else(|| "unavailable".to_string());
+    println!("cargo:rustc-env={mode_env}={source_mode}");
+    println!("cargo:rustc-env={commit_env}={source_commit}");
+}
+
+fn git_head(source_dir: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(source_dir)
+        .arg("rev-parse")
+        .arg("HEAD")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let commit = String::from_utf8(output.stdout).ok()?;
+    let commit = commit.trim();
+    (!commit.is_empty()).then(|| commit.to_string())
 }
 
 fn link_ortools_dylib_dependencies(lib_dir: &std::path::Path) {
