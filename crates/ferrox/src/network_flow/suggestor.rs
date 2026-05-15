@@ -6,7 +6,7 @@ use ferrox_ortools_sys::MinCostFlowStatus;
 use ferrox_ortools_sys::safe::{OrtoolsError, SimpleMinCostFlow};
 use tracing::warn;
 
-use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::min_cost_flow_solver_identity;
 
 use super::problem::{FlowArc, FlowArcPlan, FlowSolveMode, MinCostFlowPlan, MinCostFlowRequest};
@@ -36,14 +36,11 @@ impl Suggestor for MinCostFlowSuggestor {
             .any(|f| f.id().starts_with(REQUEST_PREFIX) && !plan_exists(ctx, request_id(f.id())))
     }
 
+    fn provenance(&self) -> &'static str {
+        FERROX_PROVENANCE.as_str()
+    }
+
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
-        let _span = suggestor_span(
-            self.name(),
-            ContextKey::Seeds,
-            ContextKey::Strategies,
-            ctx.count(ContextKey::Seeds),
-        )
-        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx

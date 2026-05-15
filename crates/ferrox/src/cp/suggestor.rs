@@ -7,7 +7,7 @@ use ferrox_ortools_sys::safe::{CpModel, OrtoolsError};
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
-use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
 use super::problem::{ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpTerm};
@@ -37,14 +37,11 @@ impl Suggestor for CpSatSuggestor {
             .any(|f| f.id().starts_with(REQUEST_PREFIX) && !plan_exists(ctx, request_id(f.id())))
     }
 
+    fn provenance(&self) -> &'static str {
+        FERROX_PROVENANCE.as_str()
+    }
+
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
-        let _span = suggestor_span(
-            self.name(),
-            ContextKey::Seeds,
-            ContextKey::Strategies,
-            ctx.count(ContextKey::Seeds),
-        )
-        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx

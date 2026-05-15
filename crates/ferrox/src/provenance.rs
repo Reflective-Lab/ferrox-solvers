@@ -3,9 +3,14 @@
 //! Migrated to the [`converge_pack::ProvenanceSource`] trait. Public
 //! surface is unchanged at call sites:
 //! `FERROX_PROVENANCE.proposed_fact(...)` reads the same.
+//!
+//! The `converge-core` engine emits the uniform `suggestor.execute`
+//! tracing span automatically around every `Suggestor::execute`
+//! call. Suggestors override `Suggestor::provenance()` to return
+//! `FERROX_PROVENANCE.as_str()` so the engine's span carries the
+//! right origin.
 
-use converge_pack::{ContextKey, ProvenanceSource};
-use tracing::info_span;
+use converge_pack::ProvenanceSource;
 
 /// Marker type identifying ferrox-emitted facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,30 +25,10 @@ impl ProvenanceSource for Ferrox {
 /// Canonical provenance constant for ferrox.
 pub const FERROX_PROVENANCE: Ferrox = Ferrox;
 
-/// Legacy per-crate suggestor span helper.
-///
-/// Internal-only transitional shim. The engine emits the canonical
-/// `suggestor.execute` span automatically; existing call sites in this
-/// crate are migrated as they're touched.
-pub(crate) fn suggestor_span(
-    name: &str,
-    input_key: ContextKey,
-    output_key: ContextKey,
-    input_count: usize,
-) -> tracing::Span {
-    info_span!(
-        "ferrox.suggestor.execute",
-        provenance = FERROX_PROVENANCE.as_str(),
-        suggestor = name,
-        input_key = ?input_key,
-        output_key = ?output_key,
-        input_count
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use converge_pack::ContextKey;
 
     #[test]
     fn provenance_string_is_stable() {

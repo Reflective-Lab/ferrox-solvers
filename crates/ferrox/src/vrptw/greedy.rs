@@ -3,7 +3,7 @@ use converge_pack::{AgentEffect, Context, ContextKey, ProvenanceSource, Suggesto
 use std::time::Instant;
 use tracing::warn;
 
-use crate::provenance::{FERROX_PROVENANCE, suggestor_span};
+use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::non_native_solver_identity;
 
 use super::problem::{RouteStop, VrptwPlan, VrptwRequest};
@@ -41,14 +41,11 @@ impl Suggestor for NearestNeighborSuggestor {
         })
     }
 
+    fn provenance(&self) -> &'static str {
+        FERROX_PROVENANCE.as_str()
+    }
+
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {
-        let _span = suggestor_span(
-            self.name(),
-            ContextKey::Seeds,
-            ContextKey::Strategies,
-            ctx.count(ContextKey::Seeds),
-        )
-        .entered();
         let mut proposals = Vec::new();
 
         for fact in ctx
