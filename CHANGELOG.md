@@ -7,6 +7,13 @@ Versioning before 1.0 with the usual pre-1.0 compatibility caveats.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-05-17
+
+### Dependencies
+- Bumped `converge-pack`, `converge-core`, `converge-model`, `converge-provider`
+  floor from 3.9.0 to 3.9.1. No API change; patch-level alignment with the
+  Converge platform 3.9.1 release.
+
 ## [0.7.0] - 2026-05-15
 
 ### Changed

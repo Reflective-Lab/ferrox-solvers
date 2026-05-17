@@ -5,7 +5,20 @@ source: mixed
 
 > See `~/dev/reflective/stack/bedrock-platform/EPIC.md` for the coarse-grained outcomes these milestones advance.
 
-## Current: v0.5.1 — Converge 3.8.1 Solver Baseline
+## Shipped: v0.7.1 — Converge 3.9.1 alignment
+
+**Released:** 2026-05-17 | **Tracks:** Converge 3.9.1
+
+- Bumped `converge-pack`, `converge-core`, `converge-model`,
+  `converge-provider` floor from 3.9.0 to 3.9.1.
+- No public API change in Ferrox; patch-level over 0.7.0.
+- Internal sys-crate workspace pins (`converge-ferrox-ortools-sys`,
+  `converge-ferrox-highs-sys`, `converge-ferrox-solver`) bumped to 0.7.1
+  in lockstep.
+- All five `just release-check` gates green; tag pushed and crates
+  republished to crates.io.
+
+## Shipped: v0.5.1 — Converge 3.8.1 Solver Baseline
 
 **Target:** 2026-05 | **Tracks:** Converge 3.8.1
 
