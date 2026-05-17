@@ -14,9 +14,3 @@ ferrox       = { path = "../../crates/ferrox", package = "converge-ferrox-solver
 converge-core = "3.9.1"
 converge-pack = "3.9.1"
 tokio        = { version = "1", features = ["macros", "rt-multi-thread"] }
-
-[patch.crates-io]
-converge-core = { path = "../../../../bedrock-platform/converge/crates/core" }
-converge-model = { path = "../../../../bedrock-platform/converge/crates/model" }
-converge-pack = { path = "../../../../bedrock-platform/converge/crates/pack" }
-converge-provider = { path = "../../../../bedrock-platform/converge/crates/provider" }
