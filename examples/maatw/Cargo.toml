@@ -11,8 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 ferrox       = { path = "../../crates/ferrox", package = "converge-ferrox-solver", features = ["ortools"] }
-converge-core = "3.8.1"
-converge-pack = "3.8.1"
+converge-core = "3.9.1"
+converge-pack = "3.9.1"
 tokio        = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [patch.crates-io]

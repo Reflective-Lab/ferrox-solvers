@@ -21,10 +21,10 @@ ferrox-highs-sys   = { path = "crates/highs-sys",   package = "converge-ferrox-h
 ferrox             = { path = "crates/ferrox",      package = "converge-ferrox-solver",     version = "0.7.0" }
 
 # converge
-converge-pack = "3.9.0"
-converge-model = "3.9.0"
-converge-core = "3.9.0"
-converge-provider = "3.9.0"
+converge-pack = "3.9.1"
+converge-model = "3.9.1"
+converge-core = "3.9.1"
+converge-provider = "3.9.1"
 
 # shared
 async-trait = "0.1"
