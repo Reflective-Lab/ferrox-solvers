@@ -134,6 +134,9 @@ pub mod safe {
 
     impl HighsSolver {
         pub fn new() -> Self {
+            // SAFETY: `highs_create` allocates a fresh HiGHS instance and returns
+            // a non-null pointer on success; we wrap it in NonNull immediately and
+            // the resulting HighsSolver becomes its unique owner.
             unsafe {
                 Self {
                     ptr: NonNull::new(highs_create()).expect("highs_create returned null"),
@@ -151,6 +154,9 @@ pub mod safe {
         /// Add a continuous variable. Returns the column index.
         pub fn try_add_col(&mut self, cost: f64, lb: f64, ub: f64) -> Result<i32> {
             validate_col(cost, lb, ub)?;
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; cost/lb/ub have been validated as finite and
+            // lb <= ub by validate_col above.
             ensure_ok(
                 unsafe { highs_add_col(self.ptr.as_ptr(), cost, lb, ub) },
                 "highs_add_col",
@@ -169,6 +175,10 @@ pub mod safe {
         /// Add an integer variable. Returns the column index.
         pub fn try_add_int_col(&mut self, cost: f64, lb: f64, ub: f64) -> Result<i32> {
             let col = self.try_add_col(cost, lb, ub)?;
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; `col` is a valid column index returned by the
+            // immediately preceding try_add_col call, and 1 is the documented
+            // integer-type sentinel.
             ensure_ok(
                 unsafe { highs_change_col_integer_type(self.ptr.as_ptr(), col, 1) },
                 "highs_change_col_integer_type",
@@ -205,6 +215,10 @@ pub mod safe {
             let nnz = i32::try_from(indices.len()).map_err(|_| {
                 HighsError::InvalidInput("row non-zero count exceeds i32".to_string())
             })?;
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; lb/ub/indices/coeffs have all been validated by
+            // validate_row above; `nnz` matches the length of both slices and
+            // the slice pointers remain valid for the duration of the call.
             ensure_ok(
                 unsafe {
                     highs_add_row(
@@ -231,6 +245,8 @@ pub mod safe {
                     "time limit must be finite and > 0".to_string(),
                 ));
             }
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; `secs` has been validated as finite and positive above.
             ensure_ok(
                 unsafe { highs_set_time_limit(self.ptr.as_ptr(), secs) },
                 "highs_set_time_limit",
@@ -248,6 +264,8 @@ pub mod safe {
                     "MIP relative gap must be finite and >= 0".to_string(),
                 ));
             }
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; `gap` has been validated as finite and non-negative above.
             ensure_ok(
                 unsafe { highs_set_mip_rel_gap(self.ptr.as_ptr(), gap) },
                 "highs_set_mip_rel_gap",
@@ -259,11 +277,18 @@ pub mod safe {
         }
 
         pub fn try_run(&mut self) -> Result<HighsModelStatus> {
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; no aliasing occurs because `&mut self` is held.
             ensure_ok(unsafe { highs_run(self.ptr.as_ptr()) }, "highs_run")?;
+            // SAFETY: same as above; highs_run has returned Ok so the model status
+            // is now valid to read.
             Ok(unsafe { highs_get_model_status(self.ptr.as_ptr()) })
         }
 
         pub fn objective_value(&self) -> f64 {
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; the caller is responsible for only invoking this
+            // after a successful solve.
             unsafe { highs_get_objective_value(self.ptr.as_ptr()) }
         }
 
@@ -280,6 +305,10 @@ pub mod safe {
             }
 
             let mut value = 0.0;
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; `col` has been bounds-checked against self.num_cols
+            // above; `value` is a local stack variable so addr_of_mut! yields a
+            // valid, properly-aligned *mut f64 for the duration of the call.
             ensure_ok(
                 unsafe {
                     highs_get_col_value_checked(
@@ -299,6 +328,9 @@ pub mod safe {
 
         pub fn try_mip_gap(&self) -> Result<f64> {
             let mut value = 1.0;
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; `value` is a local stack variable so addr_of_mut!
+            // yields a valid, properly-aligned *mut f64 for the duration of the call.
             ensure_ok(
                 unsafe {
                     highs_get_mip_gap_checked(self.ptr.as_ptr(), std::ptr::addr_of_mut!(value))
@@ -309,6 +341,8 @@ pub mod safe {
         }
 
         pub fn has_solution(&self) -> bool {
+            // SAFETY: self.ptr is a live, non-null HighsHandle owned exclusively
+            // by this struct; the function returns an i32 sentinel and cannot fail.
             unsafe { highs_solution_value_valid(self.ptr.as_ptr()) != 0 }
         }
     }
@@ -321,6 +355,9 @@ pub mod safe {
 
     impl Drop for HighsSolver {
         fn drop(&mut self) {
+            // SAFETY: self.ptr is a live, non-null HighsHandle; this is the
+            // Drop impl so the struct is being destroyed and the pointer will
+            // never be accessed again after this call.
             unsafe { highs_destroy(self.ptr.as_ptr()) }
         }
     }

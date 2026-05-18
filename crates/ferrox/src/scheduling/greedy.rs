@@ -6,6 +6,8 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::non_native_solver_identity;
 
+use crate::domain_types::Minutes;
+
 use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingSolveStatus, TaskAssignment};
 
 pub(super) const REQUEST_PREFIX: &str = "scheduling-request:";
@@ -120,27 +122,27 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
             .iter()
             .enumerate()
             .filter(|(_, a)| a.capabilities.contains(&task.required_capability))
-            .map(|(idx, a)| (idx, a, next_free[idx].max(task.release_min)))
-            .min_by_key(|(_, a, start)| (*start, a.id));
+            .map(|(idx, a)| (idx, a, next_free[idx].max(task.release_min.0)))
+            .min_by_key(|(_, a, start)| (*start, a.id.0));
 
         if let Some((idx, agent, start)) = best {
-            let end = start + task.duration_min;
-            if end <= task.deadline_min {
+            let end = start + task.duration_min.0;
+            if end <= task.deadline_min.0 {
                 next_free[idx] = end;
                 assignments.push(TaskAssignment {
                     task_id: task.id,
                     task_name: task.name.clone(),
                     agent_id: agent.id,
                     agent_name: agent.name.clone(),
-                    start_min: start,
-                    end_min: end,
+                    start_min: Minutes(start),
+                    end_min: Minutes(end),
                 });
             }
         }
     }
 
     assignments.sort_by_key(|a| a.start_min);
-    let makespan = assignments.iter().map(|a| a.end_min).max().unwrap_or(0);
+    let makespan = assignments.iter().map(|a| a.end_min).max().unwrap_or(Minutes(0));
     let scheduled = assignments.len();
 
     SchedulingPlan {
@@ -162,6 +164,7 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain_types::{AgentId, Minutes, TaskId};
     use crate::scheduling::problem::{SchedulingAgent, SchedulingTask};
     use crate::test_support::MockContext;
     use converge_pack::Suggestor;
@@ -169,7 +172,7 @@ mod tests {
 
     fn agent(id: usize, name: &str, caps: &[&str]) -> SchedulingAgent {
         SchedulingAgent {
-            id,
+            id: AgentId(id),
             name: name.into(),
             capabilities: caps.iter().map(|s| (*s).into()).collect(),
         }
@@ -184,12 +187,12 @@ mod tests {
         deadline: i64,
     ) -> SchedulingTask {
         SchedulingTask {
-            id,
+            id: TaskId(id),
             name: name.into(),
             required_capability: cap.into(),
-            duration_min: duration,
-            release_min: release,
-            deadline_min: deadline,
+            duration_min: Minutes(duration),
+            release_min: Minutes(release),
+            deadline_min: Minutes(deadline),
         }
     }
 
@@ -209,7 +212,7 @@ mod tests {
         let plan = solve_greedy(&req);
         assert_eq!(plan.tasks_total, 0);
         assert_eq!(plan.tasks_scheduled, 0);
-        assert_eq!(plan.makespan_min, 0);
+        assert_eq!(plan.makespan_min, Minutes(0));
         assert!((plan.throughput_ratio() - 0.0).abs() < f64::EPSILON);
     }
 
@@ -224,8 +227,8 @@ mod tests {
         );
         let plan = solve_greedy(&req);
         assert_eq!(plan.tasks_scheduled, 2);
-        assert_eq!(plan.makespan_min, 60);
-        assert_eq!(plan.assignments[0].task_id, 1);
+        assert_eq!(plan.makespan_min, Minutes(60));
+        assert_eq!(plan.assignments[0].task_id, TaskId(1));
         assert!((plan.throughput_ratio() - 1.0).abs() < f64::EPSILON);
     }
 
@@ -277,7 +280,7 @@ mod tests {
         );
         let plan = solve_greedy(&req);
         assert_eq!(plan.tasks_scheduled, 2);
-        assert_eq!(plan.assignments[0].agent_id, 10);
+        assert_eq!(plan.assignments[0].agent_id, AgentId(10));
     }
 
     #[test]
@@ -287,8 +290,8 @@ mod tests {
             vec![agent(0, "alice", &["py"])],
         );
         let plan = solve_greedy(&req);
-        assert_eq!(plan.assignments[0].start_min, 100);
-        assert_eq!(plan.assignments[0].end_min, 130);
+        assert_eq!(plan.assignments[0].start_min, Minutes(100));
+        assert_eq!(plan.assignments[0].end_min, Minutes(130));
     }
 
     #[tokio::test]

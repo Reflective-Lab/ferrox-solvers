@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+use crate::domain_types::{JobId, MachineId, ProcessingTime};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobShopSolveStatus {
@@ -22,15 +24,15 @@ impl JobShopSolveStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Operation {
-    pub machine_id: usize,
-    pub duration: i64,
+    pub machine_id: MachineId,
+    pub duration: ProcessingTime,
 }
 
 /// A job is an ordered sequence of operations; each must complete before the next begins.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Job {
-    pub id: usize,
+    pub id: JobId,
     pub name: String,
     /// Operations in their required execution order.
     pub operations: Vec<Operation>,
@@ -62,7 +64,7 @@ impl JobShopRequest {
         self.jobs
             .iter()
             .flat_map(|j| j.operations.iter())
-            .map(|o| o.duration)
+            .map(|o| o.duration.0)
             .sum()
     }
 }
@@ -71,9 +73,9 @@ impl JobShopRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScheduledOp {
-    pub job_id: usize,
+    pub job_id: JobId,
     pub job_name: String,
-    pub machine_id: usize,
+    pub machine_id: MachineId,
     pub op_index: usize,
     pub start: i64,
     pub end: i64,
@@ -102,6 +104,7 @@ impl FactPayload for JobShopPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain_types::{JobId, MachineId, ProcessingTime};
 
     #[test]
     fn horizon_zero_when_no_jobs() {
@@ -119,16 +122,16 @@ mod tests {
         let r = JobShopRequest {
             id: "r".into(),
             jobs: vec![Job {
-                id: 0,
+                id: JobId(0),
                 name: "j".into(),
                 operations: vec![
                     Operation {
-                        machine_id: 0,
-                        duration: 4,
+                        machine_id: MachineId(0),
+                        duration: ProcessingTime(4),
                     },
                     Operation {
-                        machine_id: 1,
-                        duration: 6,
+                        machine_id: MachineId(1),
+                        duration: ProcessingTime(6),
                     },
                 ],
             }],

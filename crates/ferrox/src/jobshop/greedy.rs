@@ -6,6 +6,8 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::non_native_solver_identity;
 
+use crate::domain_types::{JobId, MachineId};
+
 use super::problem::{JobShopPlan, JobShopRequest, JobShopSolveStatus, ScheduledOp};
 
 pub(super) const REQUEST_PREFIX: &str = "jspbench-request:";
@@ -132,11 +134,11 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
                     continue;
                 }
                 let op = &job.operations[k];
-                if op.machine_id != mach {
+                if op.machine_id.0 != mach {
                     continue;
                 }
                 let earliest = job_free[j].max(machine_free[mach]);
-                candidates.push((j, k, earliest, op.duration));
+                candidates.push((j, k, earliest, op.duration.0));
             }
 
             if candidates.is_empty() {
@@ -154,9 +156,9 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
             next_op[j] = k + 1;
 
             schedule.push(ScheduledOp {
-                job_id: j,
+                job_id: JobId(j),
                 job_name: req.jobs[j].name.clone(),
-                machine_id: mach,
+                machine_id: MachineId(mach),
                 op_index: k,
                 start,
                 end,
@@ -174,7 +176,7 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
                     (0..n).any(|j| {
                         let k = next_op[j];
                         k < req.jobs[j].operations.len()
-                            && req.jobs[j].operations[k].machine_id
+                            && req.jobs[j].operations[k].machine_id.0
                                 == machine_free
                                     .iter()
                                     .position(|&f| f == t)
@@ -195,7 +197,7 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
         }
     }
 
-    schedule.sort_by_key(|s| (s.machine_id, s.start));
+    schedule.sort_by_key(|s| (s.machine_id.0, s.start));
     let makespan = schedule.iter().map(|s| s.end).max().unwrap_or(0);
 
     JobShopPlan {
@@ -216,6 +218,7 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain_types::{JobId, MachineId, ProcessingTime};
     use crate::jobshop::problem::{Job, Operation};
     use crate::test_support::MockContext;
     use converge_pack::Suggestor;
@@ -223,14 +226,14 @@ mod tests {
 
     fn op(machine: usize, dur: i64) -> Operation {
         Operation {
-            machine_id: machine,
-            duration: dur,
+            machine_id: MachineId(machine),
+            duration: ProcessingTime(dur),
         }
     }
 
     fn job(id: usize, name: &str, ops: Vec<Operation>) -> Job {
         Job {
-            id,
+            id: JobId(id),
             name: name.into(),
             operations: ops,
         }
@@ -278,8 +281,8 @@ mod tests {
         let plan = solve_greedy(&r);
         assert_eq!(plan.schedule.len(), 2);
         // SPT: shorter goes first
-        assert_eq!(plan.schedule[0].job_id, 1);
-        assert_eq!(plan.schedule[1].job_id, 0);
+        assert_eq!(plan.schedule[0].job_id, JobId(1));
+        assert_eq!(plan.schedule[1].job_id, JobId(0));
     }
 
     #[test]

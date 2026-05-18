@@ -138,9 +138,9 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
         let mut je = Vec::new();
         let mut ji = Vec::new();
         for (k, op) in job.operations.iter().enumerate() {
-            let s = model.new_int_var(0, horizon, &format!("s_{}_{k}", job.id));
-            let e = model.new_int_var(op.duration, horizon, &format!("e_{}_{k}", job.id));
-            let iv = model.new_fixed_interval_var(s, op.duration, e, &format!("iv_{}_{k}", job.id));
+            let s = model.new_int_var(0, horizon, &format!("s_{}_{k}", job.id.0));
+            let e = model.new_int_var(op.duration.0, horizon, &format!("e_{}_{k}", job.id.0));
+            let iv = model.new_fixed_interval_var(s, op.duration.0, e, &format!("iv_{}_{k}", job.id.0));
             js.push(s);
             je.push(e);
             ji.push(iv);
@@ -165,7 +165,7 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
     let mut machine_intervals: Vec<Vec<i32>> = vec![Vec::new(); req.num_machines];
     for (j, job) in req.jobs.iter().enumerate() {
         for (k, op) in job.operations.iter().enumerate() {
-            machine_intervals[op.machine_id].push(intervals[j][k]);
+            machine_intervals[op.machine_id.0].push(intervals[j][k]);
         }
     }
     for ivs in &machine_intervals {
@@ -209,11 +209,11 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
                 machine_id: op.machine_id,
                 op_index: k,
                 start,
-                end: start + op.duration,
+                end: start + op.duration.0,
             });
         }
     }
-    schedule.sort_by_key(|s| (s.machine_id, s.start));
+    schedule.sort_by_key(|s| (s.machine_id.0, s.start));
 
     let lower_bound = if status == JobShopSolveStatus::Optimal {
         Some(makespan)
@@ -247,23 +247,23 @@ fn validate_jobshop_request(req: &JobShopRequest) -> Result<(), String> {
     let mut horizon = 0_i64;
     for job in &req.jobs {
         if job.operations.is_empty() {
-            return Err(format!("job '{}' has no operations", job.id));
+            return Err(format!("job '{}' has no operations", job.id.0));
         }
         for op in &job.operations {
-            if op.machine_id >= req.num_machines {
+            if op.machine_id.0 >= req.num_machines {
                 return Err(format!(
                     "operation references machine {} outside 0..{}",
-                    op.machine_id, req.num_machines
+                    op.machine_id.0, req.num_machines
                 ));
             }
-            if op.duration < 0 {
+            if op.duration.0 < 0 {
                 return Err(format!(
                     "operation on machine {} has negative duration",
-                    op.machine_id
+                    op.machine_id.0
                 ));
             }
             horizon = horizon
-                .checked_add(op.duration)
+                .checked_add(op.duration.0)
                 .ok_or_else(|| "job-shop horizon overflows i64".to_string())?;
         }
     }
@@ -294,20 +294,21 @@ fn jobshop_cpsat_identity(req: &JobShopRequest) -> ExecutionIdentity {
 #[allow(clippy::cast_possible_wrap, clippy::similar_names)]
 mod tests {
     use super::*;
+    use crate::domain_types::{JobId, MachineId, ProcessingTime};
     use crate::jobshop::problem::{Job, JobShopSolveStatus, Operation};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 
     fn op(machine: usize, dur: i64) -> Operation {
         Operation {
-            machine_id: machine,
-            duration: dur,
+            machine_id: MachineId(machine),
+            duration: ProcessingTime(dur),
         }
     }
 
     fn job(id: usize, ops: Vec<Operation>) -> Job {
         Job {
-            id,
+            id: JobId(id),
             name: format!("j{id}"),
             operations: ops,
         }

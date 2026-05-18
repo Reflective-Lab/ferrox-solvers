@@ -1,3 +1,4 @@
+pub mod domain_types;
 pub mod error;
 pub mod provenance;
 pub(crate) mod serde_util;
@@ -24,5 +25,6 @@ pub mod scheduling;
 pub mod vrptw;
 
 pub use converge_pack::ExecutionIdentity;
+pub use domain_types::*;
 pub use error::{FerroxError, Result};
 pub use provenance::{FERROX_PROVENANCE, Ferrox};

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+use crate::domain_types::{AgentId, Minutes, TaskId};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SchedulingSolveStatus {
@@ -23,7 +25,7 @@ impl SchedulingSolveStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SchedulingAgent {
-    pub id: usize,
+    pub id: AgentId,
     pub name: String,
     /// Capability tags this agent possesses (e.g. "python", "ml", "rust").
     pub capabilities: Vec<String>,
@@ -33,16 +35,16 @@ pub struct SchedulingAgent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SchedulingTask {
-    pub id: usize,
+    pub id: TaskId,
     pub name: String,
     /// The single capability an agent must have to execute this task.
     pub required_capability: String,
     /// Duration in minutes.
-    pub duration_min: i64,
+    pub duration_min: Minutes,
     /// Earliest start (minutes from horizon start).
-    pub release_min: i64,
+    pub release_min: Minutes,
     /// Latest finish (minutes from horizon start).  Must be ≥ release + duration.
-    pub deadline_min: i64,
+    pub deadline_min: Minutes,
 }
 
 /// Seeded into `ContextKey::Seeds` with id prefix `"scheduling-request:"`.
@@ -72,12 +74,12 @@ fn default_time_limit() -> f64 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskAssignment {
-    pub task_id: usize,
+    pub task_id: TaskId,
     pub task_name: String,
-    pub agent_id: usize,
+    pub agent_id: AgentId,
     pub agent_name: String,
-    pub start_min: i64,
-    pub end_min: i64,
+    pub start_min: Minutes,
+    pub end_min: Minutes,
 }
 
 /// Written to `ContextKey::Strategies` with id prefix `"scheduling-plan-<solver>:"`.
@@ -89,7 +91,7 @@ pub struct SchedulingPlan {
     pub tasks_total: usize,
     pub tasks_scheduled: usize,
     /// Completion time of the last scheduled task (0 if nothing scheduled).
-    pub makespan_min: i64,
+    pub makespan_min: Minutes,
     /// Short identifier for the algorithm that produced this plan.
     pub solver: String,
     pub execution_identity: ExecutionIdentity,
@@ -116,6 +118,7 @@ impl SchedulingPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain_types::Minutes;
     use crate::solver_identity::non_native_solver_identity;
 
     fn empty_plan(tasks_total: usize, tasks_scheduled: usize) -> SchedulingPlan {
@@ -124,7 +127,7 @@ mod tests {
             assignments: vec![],
             tasks_total,
             tasks_scheduled,
-            makespan_min: 0,
+            makespan_min: Minutes(0),
             solver: "x".into(),
             execution_identity: non_native_solver_identity("x", "test"),
             status: SchedulingSolveStatus::Feasible,

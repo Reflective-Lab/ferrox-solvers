@@ -331,6 +331,9 @@ pub mod safe {
         Ok(())
     }
 
+    // CP-SAT literal encoding: non-negative index = variable as-is;
+    // negative index = -(var_index + 1) represents the negation of that bool variable.
+    // This matches the OR-Tools CpModelBuilder::BoolVar::Not() convention.
     fn bool_index_from_literal(lit: i32) -> Option<i32> {
         if lit >= 0 {
             Some(lit)
@@ -398,6 +401,9 @@ pub mod safe {
         }
 
         pub fn try_new() -> Result<Self> {
+            // SAFETY: `cpmodel_new` allocates a fresh CpModelBuilder and returns
+            // a non-null pointer on success; we wrap it in NonNull immediately and
+            // the resulting CpModel becomes its unique owner.
             unsafe {
                 let ptr = NonNull::new(cpmodel_new())
                     .ok_or(OrtoolsError::NativeCallFailed("cpmodel_new"))?;
@@ -418,6 +424,9 @@ pub mod safe {
         pub fn try_new_int_var(&mut self, lb: i64, ub: i64, name: &str) -> Result<i32> {
             validate_int_domain(lb, ub, "CP-SAT int variable")?;
             let c = cstring(name, "CP-SAT int variable name")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; lb/ub have been validated (lb <= ub); c is a valid
+            // NUL-terminated CString that lives for the duration of the call.
             let idx = unsafe { cpmodel_new_int_var(self.ptr.as_ptr(), lb, ub, c.as_ptr()) };
             if idx < 0 {
                 return Err(OrtoolsError::NativeCallFailed("cpmodel_new_int_var"));
@@ -433,6 +442,9 @@ pub mod safe {
 
         pub fn try_new_bool_var(&mut self, name: &str) -> Result<i32> {
             let c = cstring(name, "CP-SAT bool variable name")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; c is a valid NUL-terminated CString that lives for
+            // the duration of the call.
             let idx = unsafe { cpmodel_new_bool_var(self.ptr.as_ptr(), c.as_ptr()) };
             if idx < 0 {
                 return Err(OrtoolsError::NativeCallFailed("cpmodel_new_bool_var"));
@@ -449,6 +461,10 @@ pub mod safe {
 
         pub fn try_add_linear_le(&mut self, vars: &[i32], coeffs: &[i64], rhs: i64) -> Result<()> {
             self.validate_linear_terms(vars, coeffs, "CP-SAT linear <= constraint")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; vars and coeffs have been validated (equal length,
+            // all indices known) by validate_linear_terms; slice pointers are valid
+            // for the duration of the call.
             unsafe {
                 cpmodel_add_linear_le(
                     self.ptr.as_ptr(),
@@ -468,6 +484,10 @@ pub mod safe {
 
         pub fn try_add_linear_ge(&mut self, vars: &[i32], coeffs: &[i64], rhs: i64) -> Result<()> {
             self.validate_linear_terms(vars, coeffs, "CP-SAT linear >= constraint")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; vars and coeffs have been validated (equal length,
+            // all indices known) by validate_linear_terms; slice pointers are valid
+            // for the duration of the call.
             unsafe {
                 cpmodel_add_linear_ge(
                     self.ptr.as_ptr(),
@@ -487,6 +507,10 @@ pub mod safe {
 
         pub fn try_add_linear_eq(&mut self, vars: &[i32], coeffs: &[i64], rhs: i64) -> Result<()> {
             self.validate_linear_terms(vars, coeffs, "CP-SAT linear == constraint")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; vars and coeffs have been validated (equal length,
+            // all indices known) by validate_linear_terms; slice pointers are valid
+            // for the duration of the call.
             unsafe {
                 cpmodel_add_linear_eq(
                     self.ptr.as_ptr(),
@@ -506,6 +530,9 @@ pub mod safe {
 
         pub fn try_add_all_different(&mut self, vars: &[i32]) -> Result<()> {
             ensure_known_refs(&self.vars, vars, "CP-SAT AllDifferent")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all variable indices in `vars` have been verified to
+            // exist in self.vars; the slice pointer is valid for the duration of the call.
             unsafe {
                 cpmodel_add_all_different(self.ptr.as_ptr(), vars.as_ptr(), vars.len());
             }
@@ -519,6 +546,10 @@ pub mod safe {
 
         pub fn try_add_bool_or(&mut self, lits: &[i32]) -> Result<()> {
             ensure_bool_literal_refs(&self.bools, lits, "CP-SAT BoolOr")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all literals in `lits` resolve to known bool variable
+            // indices (verified by ensure_bool_literal_refs); the slice pointer is
+            // valid for the duration of the call.
             unsafe {
                 cpmodel_add_bool_or(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
             }
@@ -532,6 +563,10 @@ pub mod safe {
 
         pub fn try_add_bool_and(&mut self, lits: &[i32]) -> Result<()> {
             ensure_bool_literal_refs(&self.bools, lits, "CP-SAT BoolAnd")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all literals in `lits` resolve to known bool variable
+            // indices (verified by ensure_bool_literal_refs); the slice pointer is
+            // valid for the duration of the call.
             unsafe {
                 cpmodel_add_bool_and(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
             }
@@ -545,6 +580,10 @@ pub mod safe {
 
         pub fn try_add_bool_xor(&mut self, lits: &[i32]) -> Result<()> {
             ensure_bool_literal_refs(&self.bools, lits, "CP-SAT BoolXor")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all literals in `lits` resolve to known bool variable
+            // indices (verified by ensure_bool_literal_refs); the slice pointer is
+            // valid for the duration of the call.
             unsafe {
                 cpmodel_add_bool_xor(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
             }
@@ -558,6 +597,9 @@ pub mod safe {
 
         pub fn try_add_implication(&mut self, lhs: i32, rhs: i32) -> Result<()> {
             ensure_bool_literal_refs(&self.bools, &[lhs, rhs], "CP-SAT Implication")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; both `lhs` and `rhs` resolve to known bool variable
+            // indices (verified by ensure_bool_literal_refs above).
             unsafe {
                 cpmodel_add_implication(self.ptr.as_ptr(), lhs, rhs);
             }
@@ -571,6 +613,10 @@ pub mod safe {
 
         pub fn try_add_at_most_one(&mut self, lits: &[i32]) -> Result<()> {
             ensure_bool_literal_refs(&self.bools, lits, "CP-SAT AtMostOne")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all literals in `lits` resolve to known bool variable
+            // indices (verified by ensure_bool_literal_refs); the slice pointer is
+            // valid for the duration of the call.
             unsafe {
                 cpmodel_add_at_most_one(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
             }
@@ -584,6 +630,10 @@ pub mod safe {
 
         pub fn try_add_exactly_one(&mut self, lits: &[i32]) -> Result<()> {
             ensure_bool_literal_refs(&self.bools, lits, "CP-SAT ExactlyOne")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all literals in `lits` resolve to known bool variable
+            // indices (verified by ensure_bool_literal_refs); the slice pointer is
+            // valid for the duration of the call.
             unsafe {
                 cpmodel_add_exactly_one(self.ptr.as_ptr(), lits.as_ptr(), lits.len());
             }
@@ -609,6 +659,11 @@ pub mod safe {
                 )));
             }
             let flat: Vec<i64> = tuples.iter().flatten().copied().collect();
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all variable indices have been verified to exist in
+            // self.vars; every tuple has been verified to have the same arity as
+            // `vars`; `flat` is a contiguous Vec with tuples.len() * vars.len()
+            // elements so `tuples.len()` correctly identifies the row count.
             unsafe {
                 cpmodel_add_allowed_assignments(
                     self.ptr.as_ptr(),
@@ -628,6 +683,10 @@ pub mod safe {
 
         pub fn try_minimize(&mut self, vars: &[i32], coeffs: &[i64]) -> Result<()> {
             self.validate_linear_terms(vars, coeffs, "CP-SAT objective")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; vars and coeffs have been validated (equal length,
+            // all indices known) by validate_linear_terms; slice pointers are valid
+            // for the duration of the call.
             unsafe {
                 cpmodel_minimize(
                     self.ptr.as_ptr(),
@@ -646,6 +705,10 @@ pub mod safe {
 
         pub fn try_maximize(&mut self, vars: &[i32], coeffs: &[i64]) -> Result<()> {
             self.validate_linear_terms(vars, coeffs, "CP-SAT objective")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; vars and coeffs have been validated (equal length,
+            // all indices known) by validate_linear_terms; slice pointers are valid
+            // for the duration of the call.
             unsafe {
                 cpmodel_maximize(
                     self.ptr.as_ptr(),
@@ -679,6 +742,10 @@ pub mod safe {
             ensure_known_ref(&self.vars, end, "CP-SAT interval end")?;
             ensure_non_negative_i64(size, "CP-SAT interval size")?;
             let c = cstring(name, "CP-SAT interval name")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; start and end are verified known variable indices;
+            // size is non-negative; c is a valid NUL-terminated CString that lives
+            // for the duration of the call.
             let idx = unsafe {
                 cpmodel_new_interval_var(self.ptr.as_ptr(), start, size, end, c.as_ptr())
             };
@@ -714,6 +781,10 @@ pub mod safe {
             ensure_known_ref(&self.bools, lit, "CP-SAT optional interval literal")?;
             ensure_non_negative_i64(size, "CP-SAT optional interval size")?;
             let c = cstring(name, "CP-SAT optional interval name")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; start and end are verified known variable indices;
+            // lit is a verified known bool variable index; size is non-negative;
+            // c is a valid NUL-terminated CString that lives for the duration of the call.
             let idx = unsafe {
                 cpmodel_new_optional_interval_var(
                     self.ptr.as_ptr(),
@@ -762,6 +833,11 @@ pub mod safe {
                 ensure_non_negative(head, "CP-SAT circuit head")?;
             }
             ensure_known_refs(&self.bools, lits, "CP-SAT circuit literal")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; tails, heads, and lits are equal-length slices (checked
+            // above), all tail/head node indices are non-negative, and all literal
+            // indices are verified known bool variables; slice pointers are valid for
+            // the duration of the call.
             unsafe {
                 cpmodel_add_circuit(
                     self.ptr.as_ptr(),
@@ -781,6 +857,9 @@ pub mod safe {
 
         pub fn try_add_no_overlap(&mut self, intervals: &[i32]) -> Result<()> {
             ensure_known_refs(&self.intervals, intervals, "CP-SAT NoOverlap")?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all interval indices are verified to exist in
+            // self.intervals; the slice pointer is valid for the duration of the call.
             unsafe {
                 cpmodel_add_no_overlap(self.ptr.as_ptr(), intervals.as_ptr(), intervals.len());
             }
@@ -808,6 +887,11 @@ pub mod safe {
             for &demand in demands {
                 ensure_non_negative_i64(demand, "CP-SAT Cumulative demand")?;
             }
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all interval indices are verified to exist in
+            // self.intervals; intervals and demands are equal-length slices (checked
+            // above); capacity and all demands are non-negative; slice pointers are
+            // valid for the duration of the call.
             unsafe {
                 cpmodel_add_cumulative(
                     self.ptr.as_ptr(),
@@ -845,6 +929,10 @@ pub mod safe {
                 y_intervals,
                 "CP-SAT NoOverlap2D y interval",
             )?;
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; all x and y interval indices are verified to exist in
+            // self.intervals; the two slices are equal length (checked above);
+            // slice pointers are valid for the duration of the call.
             unsafe {
                 cpmodel_add_no_overlap_2d(
                     self.ptr.as_ptr(),
@@ -867,6 +955,10 @@ pub mod safe {
                     "CP-SAT time limit must be finite and non-negative".to_string(),
                 ));
             }
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder owned exclusively
+            // by this struct; time_limit_seconds has been validated as finite and
+            // non-negative; cpmodel_solve allocates a new CpSolverResponse on the
+            // heap which we immediately wrap in NonNull, becoming its unique owner.
             unsafe {
                 let ptr = NonNull::new(cpmodel_solve(self.ptr.as_ptr(), time_limit_seconds))
                     .ok_or(OrtoolsError::NativeCallFailed("cpmodel_solve"))?;
@@ -900,6 +992,9 @@ pub mod safe {
 
     impl Drop for CpModel {
         fn drop(&mut self) {
+            // SAFETY: self.ptr is a live, non-null CpModelBuilder; this is the
+            // Drop impl so the struct is being destroyed and the pointer will
+            // never be accessed again after this call.
             unsafe { cpmodel_free(self.ptr.as_ptr()) }
         }
     }
@@ -911,6 +1006,9 @@ pub mod safe {
 
     impl CpSolution {
         pub fn status(&self) -> OrtoolsStatus {
+            // SAFETY: self.ptr is a live, non-null CpSolverResponse allocated by
+            // cpmodel_solve and owned exclusively by this struct; reading the
+            // status is always safe after a successful solve.
             unsafe { cpresponse_status(self.ptr.as_ptr()) }
         }
         pub fn objective_value(&self) -> i64 {
@@ -921,6 +1019,9 @@ pub mod safe {
             if !self.status().is_success() {
                 return Err(OrtoolsError::MissingSolution("cpresponse_objective_value"));
             }
+            // SAFETY: self.ptr is a live, non-null CpSolverResponse owned exclusively
+            // by this struct; the status check above guarantees a feasible/optimal
+            // solution exists, so the objective value is populated by OR-Tools.
             Ok(unsafe { cpresponse_objective_value(self.ptr.as_ptr()) })
         }
         pub fn value(&self, var_index: i32) -> i64 {
@@ -932,15 +1033,24 @@ pub mod safe {
                 return Err(OrtoolsError::MissingSolution("cpresponse_value"));
             }
             ensure_known_ref(&self.vars, var_index, "CP-SAT solution value")?;
+            // SAFETY: self.ptr is a live, non-null CpSolverResponse owned exclusively
+            // by this struct; the status check above guarantees a solution exists;
+            // var_index has been verified to be a known variable index, so the
+            // value array is populated for this index by OR-Tools.
             Ok(unsafe { cpresponse_value(self.ptr.as_ptr(), var_index) })
         }
         pub fn wall_time(&self) -> f64 {
+            // SAFETY: self.ptr is a live, non-null CpSolverResponse owned exclusively
+            // by this struct; wall time is always populated regardless of solve outcome.
             unsafe { cpresponse_wall_time(self.ptr.as_ptr()) }
         }
     }
 
     impl Drop for CpSolution {
         fn drop(&mut self) {
+            // SAFETY: self.ptr is a live, non-null CpSolverResponse; this is the
+            // Drop impl so the struct is being destroyed and the pointer will
+            // never be accessed again after this call.
             unsafe { cpresponse_free(self.ptr.as_ptr()) }
         }
     }
@@ -959,6 +1069,10 @@ pub mod safe {
 
         pub fn try_new_glop(name: &str) -> Result<Self> {
             let c = cstring(name, "GLOP solver name")?;
+            // SAFETY: `mpsolver_new` allocates a fresh MpSolver instance and returns
+            // a non-null pointer on success; we wrap it in NonNull immediately and
+            // the resulting LinearSolver becomes its unique owner.  c is a valid
+            // NUL-terminated CString that lives for the duration of the call.
             unsafe {
                 let ptr = NonNull::new(mpsolver_new(c.as_ptr(), LpSolverType::Glop))
                     .ok_or(OrtoolsError::NativeCallFailed("mpsolver_new"))?;
@@ -979,6 +1093,9 @@ pub mod safe {
         pub fn try_num_var(&mut self, lb: f64, ub: f64, name: &str) -> Result<i32> {
             validate_float_domain(lb, ub, "GLOP numeric variable")?;
             let c = cstring(name, "GLOP numeric variable name")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; lb/ub have been validated (finite, lb <= ub); c is a
+            // valid NUL-terminated CString that lives for the duration of the call.
             let idx = unsafe { mpsolver_num_var(self.ptr.as_ptr(), lb, ub, c.as_ptr()) };
             self.record_var_index(idx, "mpsolver_num_var")
         }
@@ -991,6 +1108,9 @@ pub mod safe {
         pub fn try_int_var(&mut self, lb: f64, ub: f64, name: &str) -> Result<i32> {
             validate_float_domain(lb, ub, "MPSolver integer variable")?;
             let c = cstring(name, "MPSolver integer variable name")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; lb/ub have been validated (finite, lb <= ub); c is a
+            // valid NUL-terminated CString that lives for the duration of the call.
             let idx = unsafe { mpsolver_int_var(self.ptr.as_ptr(), lb, ub, c.as_ptr()) };
             self.record_var_index(idx, "mpsolver_int_var")
         }
@@ -1002,6 +1122,9 @@ pub mod safe {
 
         pub fn try_bool_var(&mut self, name: &str) -> Result<i32> {
             let c = cstring(name, "MPSolver bool variable name")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; c is a valid NUL-terminated CString that lives for the
+            // duration of the call.
             let idx = unsafe { mpsolver_bool_var(self.ptr.as_ptr(), c.as_ptr()) };
             self.record_var_index(idx, "mpsolver_bool_var")
         }
@@ -1014,6 +1137,9 @@ pub mod safe {
         pub fn try_add_constraint(&mut self, lb: f64, ub: f64, name: &str) -> Result<i32> {
             validate_float_domain(lb, ub, "GLOP constraint")?;
             let c = cstring(name, "GLOP constraint name")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; lb/ub have been validated (no NaN, lb <= ub); c is a
+            // valid NUL-terminated CString that lives for the duration of the call.
             let idx = unsafe { mpsolver_add_constraint(self.ptr.as_ptr(), lb, ub, c.as_ptr()) };
             if idx < 0 {
                 return Err(OrtoolsError::NativeCallFailed("mpsolver_add_constraint"));
@@ -1034,6 +1160,9 @@ pub mod safe {
             self.validate_constraint_index(ci)?;
             self.validate_var_index(vi)?;
             validate_finite(coeff, "GLOP constraint coefficient")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; ci and vi have been validated as in-bounds indices;
+            // coeff is a finite f64.
             unsafe { mpsolver_set_constraint_coeff(self.ptr.as_ptr(), ci, vi, coeff) }
             Ok(())
         }
@@ -1046,14 +1175,20 @@ pub mod safe {
         pub fn try_set_objective_coeff(&mut self, vi: i32, coeff: f64) -> Result<()> {
             self.validate_var_index(vi)?;
             validate_finite(coeff, "GLOP objective coefficient")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; vi has been validated as an in-bounds index; coeff is finite.
             unsafe { mpsolver_set_objective_coeff(self.ptr.as_ptr(), vi, coeff) }
             Ok(())
         }
 
         pub fn maximize(&mut self) {
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; setting the objective direction has no preconditions.
             unsafe { mpsolver_maximize(self.ptr.as_ptr()) }
         }
         pub fn minimize(&mut self) {
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; setting the objective direction has no preconditions.
             unsafe { mpsolver_minimize(self.ptr.as_ptr()) }
         }
 
@@ -1063,6 +1198,8 @@ pub mod safe {
         }
 
         pub fn try_solve(&mut self) -> Result<OrtoolsStatus> {
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; no aliasing occurs because `&mut self` is held.
             let status = unsafe { mpsolver_solve(self.ptr.as_ptr()) };
             self.last_status = Some(status);
             Ok(status)
@@ -1075,6 +1212,9 @@ pub mod safe {
 
         pub fn try_objective_value(&self) -> Result<f64> {
             self.ensure_solution("mpsolver_objective_value")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; ensure_solution above guarantees a successful solve has
+            // completed, so the objective value is populated.
             Ok(unsafe { mpsolver_objective_value(self.ptr.as_ptr()) })
         }
 
@@ -1086,6 +1226,10 @@ pub mod safe {
         pub fn try_var_value(&self, vi: i32) -> Result<f64> {
             self.validate_var_index(vi)?;
             self.ensure_solution("mpsolver_var_value")?;
+            // SAFETY: self.ptr is a live, non-null MpSolver owned exclusively by
+            // this struct; vi has been validated as an in-bounds index; ensure_solution
+            // above guarantees a successful solve has completed, so variable values
+            // are populated.
             Ok(unsafe { mpsolver_var_value(self.ptr.as_ptr(), vi) })
         }
 
@@ -1133,6 +1277,9 @@ pub mod safe {
 
     impl Drop for LinearSolver {
         fn drop(&mut self) {
+            // SAFETY: self.ptr is a live, non-null MpSolver; this is the Drop impl
+            // so the struct is being destroyed and the pointer will never be
+            // accessed again after this call.
             unsafe { mpsolver_free(self.ptr.as_ptr()) }
         }
     }
@@ -1152,6 +1299,10 @@ pub mod safe {
         pub fn try_new(reserve_num_nodes: i32, reserve_num_arcs: i32) -> Result<Self> {
             ensure_non_negative(reserve_num_nodes, "min-cost flow node reserve")?;
             ensure_non_negative(reserve_num_arcs, "min-cost flow arc reserve")?;
+            // SAFETY: `mincostflow_new` allocates a fresh MinCostFlow and returns
+            // a non-null pointer on success; both reserve arguments are non-negative
+            // (checked above); we wrap the result in NonNull immediately and the
+            // resulting SimpleMinCostFlow becomes its unique owner.
             unsafe {
                 let ptr = NonNull::new(mincostflow_new(reserve_num_nodes, reserve_num_arcs))
                     .ok_or(OrtoolsError::NativeCallFailed("mincostflow_new"))?;
@@ -1184,6 +1335,9 @@ pub mod safe {
             ensure_non_negative(tail, "min-cost flow arc tail")?;
             ensure_non_negative(head, "min-cost flow arc head")?;
             ensure_non_negative_i64(capacity, "min-cost flow arc capacity")?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; tail and head are non-negative node indices; capacity is
+            // non-negative; unit_cost is unrestricted (may be negative to model gain).
             let idx =
                 unsafe { mincostflow_add_arc(self.ptr.as_ptr(), tail, head, capacity, unit_cost) };
             if idx < 0 {
@@ -1203,6 +1357,9 @@ pub mod safe {
 
         pub fn try_set_node_supply(&mut self, node: i32, supply: i64) -> Result<()> {
             ensure_non_negative(node, "min-cost flow supply node")?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; node is a non-negative index; supply may be any i64
+            // (positive = source, negative = sink per OR-Tools convention).
             unsafe { mincostflow_set_node_supply(self.ptr.as_ptr(), node, supply) }
             Ok(())
         }
@@ -1213,6 +1370,8 @@ pub mod safe {
         }
 
         pub fn try_solve(&mut self) -> Result<MinCostFlowStatus> {
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; no aliasing occurs because `&mut self` is held.
             let status = unsafe { mincostflow_solve(self.ptr.as_ptr()) };
             self.last_status = Some(status);
             Ok(status)
@@ -1224,6 +1383,8 @@ pub mod safe {
         }
 
         pub fn try_solve_max_flow_with_min_cost(&mut self) -> Result<MinCostFlowStatus> {
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; no aliasing occurs because `&mut self` is held.
             let status = unsafe { mincostflow_solve_max_flow_with_min_cost(self.ptr.as_ptr()) };
             self.last_status = Some(status);
             Ok(status)
@@ -1236,6 +1397,9 @@ pub mod safe {
 
         pub fn try_optimal_cost(&self) -> Result<i64> {
             self.ensure_solution("mincostflow_optimal_cost")?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; ensure_solution above guarantees a successful solve, so
+            // the optimal cost is populated.
             Ok(unsafe { mincostflow_optimal_cost(self.ptr.as_ptr()) })
         }
 
@@ -1246,6 +1410,9 @@ pub mod safe {
 
         pub fn try_maximum_flow(&self) -> Result<i64> {
             self.ensure_solution("mincostflow_maximum_flow")?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; ensure_solution above guarantees a successful solve, so
+            // the maximum flow value is populated.
             Ok(unsafe { mincostflow_maximum_flow(self.ptr.as_ptr()) })
         }
 
@@ -1257,6 +1424,9 @@ pub mod safe {
         pub fn try_flow(&self, arc: i32) -> Result<i64> {
             validate_arc_index(arc, self.arc_count)?;
             self.ensure_solution("mincostflow_flow")?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; arc is a validated in-bounds index; ensure_solution above
+            // guarantees a successful solve, so per-arc flow values are populated.
             Ok(unsafe { mincostflow_flow(self.ptr.as_ptr(), arc) })
         }
 
@@ -1266,6 +1436,8 @@ pub mod safe {
         }
 
         pub fn try_num_arcs(&self) -> Result<i32> {
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; querying the arc count is always safe after construction.
             let native = unsafe { mincostflow_num_arcs(self.ptr.as_ptr()) };
             if native == self.arc_count {
                 Ok(native)
@@ -1281,6 +1453,8 @@ pub mod safe {
 
         pub fn try_tail(&self, arc: i32) -> Result<i32> {
             validate_arc_index(arc, self.arc_count)?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; arc has been validated as an in-bounds index above.
             Ok(unsafe { mincostflow_tail(self.ptr.as_ptr(), arc) })
         }
 
@@ -1291,6 +1465,8 @@ pub mod safe {
 
         pub fn try_head(&self, arc: i32) -> Result<i32> {
             validate_arc_index(arc, self.arc_count)?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; arc has been validated as an in-bounds index above.
             Ok(unsafe { mincostflow_head(self.ptr.as_ptr(), arc) })
         }
 
@@ -1301,6 +1477,8 @@ pub mod safe {
 
         pub fn try_capacity(&self, arc: i32) -> Result<i64> {
             validate_arc_index(arc, self.arc_count)?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; arc has been validated as an in-bounds index above.
             Ok(unsafe { mincostflow_capacity(self.ptr.as_ptr(), arc) })
         }
 
@@ -1311,6 +1489,8 @@ pub mod safe {
 
         pub fn try_unit_cost(&self, arc: i32) -> Result<i64> {
             validate_arc_index(arc, self.arc_count)?;
+            // SAFETY: self.ptr is a live, non-null MinCostFlow owned exclusively by
+            // this struct; arc has been validated as an in-bounds index above.
             Ok(unsafe { mincostflow_unit_cost(self.ptr.as_ptr(), arc) })
         }
 
@@ -1325,6 +1505,9 @@ pub mod safe {
 
     impl Drop for SimpleMinCostFlow {
         fn drop(&mut self) {
+            // SAFETY: self.ptr is a live, non-null MinCostFlow; this is the Drop
+            // impl so the struct is being destroyed and the pointer will never be
+            // accessed again after this call.
             unsafe { mincostflow_free(self.ptr.as_ptr()) }
         }
     }

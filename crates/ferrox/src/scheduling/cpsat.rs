@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 use tracing::warn;
 
+use crate::domain_types::Minutes;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
@@ -146,8 +147,8 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
             continue;
         };
 
-        let s = model.new_int_var(task.release_min, s_ub, &start_name(task));
-        let e = model.new_int_var(e_lb, task.deadline_min, &end_name(task));
+        let s = model.new_int_var(task.release_min.0, s_ub, &start_name(task));
+        let e = model.new_int_var(e_lb, task.deadline_min.0, &end_name(task));
 
         name_to_idx.insert(start_name(task), s);
         name_to_idx.insert(end_name(task), e);
@@ -167,8 +168,8 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
             .enumerate()
             .filter(|(_, a)| a.capabilities.contains(&task.required_capability))
         {
-            let x_name = x_var_name(task.id, agent.id);
-            let ov_name = ov_var_name(task.id, agent.id);
+            let x_name = x_var_name(task.id.0, agent.id.0);
+            let ov_name = ov_var_name(task.id.0, agent.id.0);
 
             let (Some(&s_idx), Some(&e_idx)) = (
                 name_to_idx.get(&start_name(task)),
@@ -182,7 +183,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
             name_to_idx.insert(x_name.clone(), x_idx);
 
             let ov_idx =
-                model.new_optional_interval_var(s_idx, task.duration_min, e_idx, x_idx, &ov_name);
+                model.new_optional_interval_var(s_idx, task.duration_min.0, e_idx, x_idx, &ov_name);
             interval_name_to_idx.insert(ov_name, ov_idx);
 
             agent_interval_idxs[agent_idx].push(ov_idx);
@@ -239,7 +240,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
             .iter()
             .filter(|a| a.capabilities.contains(&task.required_capability))
         {
-            let x_name = x_var_name(task.id, agent.id);
+            let x_name = x_var_name(task.id.0, agent.id.0);
             if let Some(&x_idx) = bool_name_to_idx.get(&x_name)
                 && solution.value(x_idx) == 1
             {
@@ -250,8 +251,8 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
                     task_name: task.name.clone(),
                     agent_id: agent.id,
                     agent_name: agent.name.clone(),
-                    start_min: start,
-                    end_min: start + task.duration_min,
+                    start_min: Minutes(start),
+                    end_min: Minutes(start + task.duration_min.0),
                 });
                 break;
             }
@@ -259,7 +260,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     }
 
     assignments.sort_by_key(|a| a.start_min);
-    let makespan = assignments.iter().map(|a| a.end_min).max().unwrap_or(0);
+    let makespan = assignments.iter().map(|a| a.end_min).max().unwrap_or(Minutes(0));
     let scheduled = assignments.len();
 
     SchedulingPlan {
@@ -278,10 +279,10 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
 // ── Variable name helpers ─────────────────────────────────────────────────────
 
 fn start_name(task: &SchedulingTask) -> String {
-    format!("s_{}", task.id)
+    format!("s_{}", task.id.0)
 }
 fn end_name(task: &SchedulingTask) -> String {
-    format!("e_{}", task.id)
+    format!("e_{}", task.id.0)
 }
 fn x_var_name(task_id: usize, agent_id: usize) -> String {
     format!("x_{task_id}_{agent_id}")
@@ -304,12 +305,12 @@ fn validate_scheduling_request(req: &SchedulingRequest) -> Result<(), String> {
 }
 
 fn feasible_window(task: &SchedulingTask) -> Option<(i64, i64)> {
-    if task.duration_min < 0 {
+    if task.duration_min.0 < 0 {
         return None;
     }
-    let latest_start = task.deadline_min.checked_sub(task.duration_min)?;
-    let earliest_end = task.release_min.checked_add(task.duration_min)?;
-    (earliest_end <= task.deadline_min && task.release_min <= latest_start)
+    let latest_start = task.deadline_min.0.checked_sub(task.duration_min.0)?;
+    let earliest_end = task.release_min.0.checked_add(task.duration_min.0)?;
+    (earliest_end <= task.deadline_min.0 && task.release_min.0 <= latest_start)
         .then_some((latest_start, earliest_end))
 }
 
@@ -319,7 +320,7 @@ fn empty_plan(req: &SchedulingRequest, status: SchedulingSolveStatus, wall_time_
         assignments: Vec::new(),
         tasks_total: req.tasks.len(),
         tasks_scheduled: 0,
-        makespan_min: 0,
+        makespan_min: Minutes(0),
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: scheduling_cpsat_identity(req),
         status,
@@ -354,13 +355,14 @@ fn scheduling_cpsat_identity(req: &SchedulingRequest) -> ExecutionIdentity {
 )]
 mod tests {
     use super::*;
+    use crate::domain_types::{AgentId, Minutes, TaskId};
     use crate::scheduling::problem::{SchedulingAgent, SchedulingSolveStatus, SchedulingTask};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 
     fn agent(id: usize, caps: &[&str]) -> SchedulingAgent {
         SchedulingAgent {
-            id,
+            id: AgentId(id),
             name: format!("a{id}"),
             capabilities: caps.iter().map(|s| (*s).into()).collect(),
         }
@@ -368,12 +370,12 @@ mod tests {
 
     fn task(id: usize, cap: &str, duration: i64, release: i64, deadline: i64) -> SchedulingTask {
         SchedulingTask {
-            id,
+            id: TaskId(id),
             name: format!("t{id}"),
             required_capability: cap.into(),
-            duration_min: duration,
-            release_min: release,
-            deadline_min: deadline,
+            duration_min: Minutes(duration),
+            release_min: Minutes(release),
+            deadline_min: Minutes(deadline),
         }
     }
 
@@ -409,7 +411,7 @@ mod tests {
         assert_eq!(plan.tasks_scheduled, 3);
         assert_eq!(plan.solver, "cp-sat-v9.15");
         for a in &plan.assignments {
-            assert!(a.end_min - a.start_min == 30);
+            assert!(a.end_min.0 - a.start_min.0 == 30);
         }
     }
 
@@ -443,8 +445,8 @@ mod tests {
             .iter()
             .map(|a| (a.task_id, a.agent_id))
             .collect();
-        assert_eq!(by_id[&1], 1);
-        assert_eq!(by_id[&2], 0);
+        assert_eq!(by_id[&TaskId(1)], AgentId(1));
+        assert_eq!(by_id[&TaskId(2)], AgentId(0));
     }
 
     #[test]
@@ -458,7 +460,7 @@ mod tests {
         assert!(
             plan.assignments
                 .iter()
-                .all(|a| a.agent_id == 10 || a.agent_id == 20)
+                .all(|a| a.agent_id == AgentId(10) || a.agent_id == AgentId(20))
         );
     }
 

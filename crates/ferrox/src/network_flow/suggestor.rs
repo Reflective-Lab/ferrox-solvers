@@ -128,15 +128,15 @@ fn solve_min_cost_flow_checked(
 
     for arc in &req.arcs {
         arc_ids.push(flow.try_add_arc_with_capacity_and_unit_cost(
-            arc.tail,
-            arc.head,
+            arc.tail.0,
+            arc.head.0,
             arc.capacity,
             arc.unit_cost,
         )?);
     }
 
     for supply in &req.supplies {
-        flow.try_set_node_supply(supply.node, supply.supply)?;
+        flow.try_set_node_supply(supply.node.0, supply.supply)?;
     }
 
     let status = match req.mode {
@@ -183,8 +183,8 @@ fn validate_request(req: &MinCostFlowRequest) -> Option<FlowSolveStatus> {
     let invalid_arc = req
         .arcs
         .iter()
-        .any(|arc| arc.tail < 0 || arc.head < 0 || arc.capacity < 0);
-    let invalid_supply = req.supplies.iter().any(|supply| supply.node < 0);
+        .any(|arc| arc.tail.0 < 0 || arc.head.0 < 0 || arc.capacity < 0);
+    let invalid_supply = req.supplies.iter().any(|supply| supply.node.0 < 0);
     if invalid_arc || invalid_supply {
         Some(FlowSolveStatus::Invalid)
     } else {
@@ -259,8 +259,8 @@ fn expected_flow(req: &MinCostFlowRequest) -> i64 {
 fn reserve_nodes(req: &MinCostFlowRequest) -> i32 {
     req.arcs
         .iter()
-        .flat_map(|arc| [arc.tail, arc.head])
-        .chain(req.supplies.iter().map(|supply| supply.node))
+        .flat_map(|arc| [arc.tail.0, arc.head.0])
+        .chain(req.supplies.iter().map(|supply| supply.node.0))
         .max()
         .map_or(0, |node| node.saturating_add(1))
 }
@@ -290,6 +290,7 @@ fn confidence(plan: &MinCostFlowPlan) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain_types::NodeId;
     use crate::network_flow::problem::{FlowArc, FlowSolveStatus, NodeSupply};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
@@ -298,15 +299,15 @@ mod tests {
     fn arc(name: &str, tail: i32, head: i32, capacity: i64, unit_cost: i64) -> FlowArc {
         FlowArc {
             name: name.into(),
-            tail,
-            head,
+            tail: NodeId(tail),
+            head: NodeId(head),
             capacity,
             unit_cost,
         }
     }
 
     fn supply(node: i32, supply: i64) -> NodeSupply {
-        NodeSupply { node, supply }
+        NodeSupply { node: NodeId(node), supply }
     }
 
     fn balanced_request(id: &str) -> MinCostFlowRequest {

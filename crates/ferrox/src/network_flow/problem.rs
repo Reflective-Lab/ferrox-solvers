@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+use crate::domain_types::NodeId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowSolveStatus {
@@ -37,8 +39,8 @@ pub enum FlowSolveMode {
 #[serde(deny_unknown_fields)]
 pub struct FlowArc {
     pub name: String,
-    pub tail: i32,
-    pub head: i32,
+    pub tail: NodeId,
+    pub head: NodeId,
     pub capacity: i64,
     pub unit_cost: i64,
 }
@@ -46,7 +48,7 @@ pub struct FlowArc {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeSupply {
-    pub node: i32,
+    pub node: NodeId,
     pub supply: i64,
 }
 
@@ -70,8 +72,8 @@ impl FactPayload for MinCostFlowRequest {
 #[serde(deny_unknown_fields)]
 pub struct FlowArcPlan {
     pub name: String,
-    pub tail: i32,
-    pub head: i32,
+    pub tail: NodeId,
+    pub head: NodeId,
     pub capacity: i64,
     pub unit_cost: i64,
     pub flow: i64,
