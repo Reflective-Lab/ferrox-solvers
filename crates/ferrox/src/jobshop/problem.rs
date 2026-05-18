@@ -2,6 +2,22 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobShopSolveStatus {
+    Optimal,
+    Feasible,
+    Infeasible,
+    Error,
+    Invalid,
+}
+
+impl JobShopSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+}
+
 /// One operation within a job: must execute on `machine_id` for `duration` units.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,8 +90,7 @@ pub struct JobShopPlan {
     pub lower_bound: Option<i64>,
     pub solver: String,
     pub execution_identity: ExecutionIdentity,
-    /// `"optimal"`, `"feasible"`, or `"error"`.
-    pub status: String,
+    pub status: JobShopSolveStatus,
     pub wall_time_seconds: f64,
 }
 

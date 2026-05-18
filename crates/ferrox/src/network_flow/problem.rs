@@ -2,6 +2,27 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowSolveStatus {
+    NotSolved,
+    Optimal,
+    Feasible,
+    Infeasible,
+    Unbalanced,
+    BadResult,
+    BadCostRange,
+    BadCapacityRange,
+    Error,
+    Invalid,
+}
+
+impl FlowSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowSolveMode {
@@ -61,7 +82,7 @@ pub struct FlowArcPlan {
 #[serde(deny_unknown_fields)]
 pub struct MinCostFlowPlan {
     pub request_id: String,
-    pub status: String,
+    pub status: FlowSolveStatus,
     pub mode: FlowSolveMode,
     pub arcs: Vec<FlowArcPlan>,
     pub optimal_cost: i64,

@@ -2,6 +2,22 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VrptwSolveStatus {
+    Optimal,
+    Feasible,
+    Infeasible,
+    Error,
+    Invalid,
+}
+
+impl VrptwSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+}
+
 /// A customer to be visited by the vehicle.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -93,7 +109,7 @@ pub struct VrptwPlan {
     pub return_time: i64,
     pub solver: String,
     pub execution_identity: ExecutionIdentity,
-    pub status: String,
+    pub status: VrptwSolveStatus,
     pub wall_time_seconds: f64,
 }
 
@@ -158,7 +174,7 @@ mod tests {
             return_time: 0,
             solver: "x".into(),
             execution_identity: non_native_solver_identity("x", "test"),
-            status: "feasible".into(),
+            status: VrptwSolveStatus::Feasible,
             wall_time_seconds: 0.0,
         };
         assert!((p.visit_ratio() - 0.0).abs() < f64::EPSILON);

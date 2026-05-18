@@ -217,7 +217,7 @@ fn cp_required_bool_literal(
 pub fn cp_resp_to_proto(p: CpSatPlan) -> p::SolveCpResponse {
     p::SolveCpResponse {
         request_id: p.request_id,
-        status: p.status,
+        status: p.status.as_str().to_string(),
         assignments: p
             .assignments
             .into_iter()
@@ -283,7 +283,7 @@ pub fn lp_req_from_proto(r: p::SolveLpRequest) -> Result<LpRequest, Status> {
 pub fn lp_resp_to_proto(p: LpPlan) -> p::SolveLpResponse {
     p::SolveLpResponse {
         request_id: p.request_id,
-        status: p.status,
+        status: p.status.as_str().to_string(),
         values: p
             .values
             .into_iter()
@@ -366,7 +366,7 @@ pub fn mip_req_from_proto(r: p::SolveMipRequest) -> Result<MipRequest, Status> {
 pub fn mip_resp_to_proto(p: MipPlan) -> p::SolveMipResponse {
     p::SolveMipResponse {
         request_id: p.request_id,
-        status: p.status,
+        status: p.status.as_str().to_string(),
         values: p
             .values
             .into_iter()
@@ -384,6 +384,9 @@ pub fn mip_resp_to_proto(p: MipPlan) -> p::SolveMipResponse {
 mod tests {
     use super::*;
     use crate::proto::ferrox::v1 as p;
+    use ferrox::cp::problem::CpSolveStatus;
+    use ferrox::lp::problem::LpSolveStatus;
+    use ferrox::mip::problem::MipSolveStatus;
 
     fn cp_term_proto(var: &str, coeff: i64) -> p::CpTerm {
         p::CpTerm {
@@ -672,7 +675,7 @@ mod tests {
     fn cp_response_round_trip() {
         let plan = ferrox::cp::problem::CpSatPlan {
             request_id: "r".into(),
-            status: "optimal".into(),
+            status: CpSolveStatus::Optimal,
             assignments: vec![("x".into(), 3), ("y".into(), 7)],
             objective_value: Some(10),
             wall_time_seconds: 0.5,
@@ -746,7 +749,7 @@ mod tests {
     fn lp_response_round_trip() {
         let plan = ferrox::lp::problem::LpPlan {
             request_id: "r".into(),
-            status: "optimal".into(),
+            status: LpSolveStatus::Optimal,
             values: vec![("x".into(), 1.5)],
             objective_value: 3.0,
             solver: "glop".into(),
@@ -850,7 +853,7 @@ mod tests {
     fn mip_response_round_trip() {
         let plan = ferrox::mip::problem::MipPlan {
             request_id: "r".into(),
-            status: "feasible".into(),
+            status: MipSolveStatus::Feasible,
             values: vec![("x".into(), 2.0), ("y".into(), 1.0)],
             objective_value: 7.0,
             mip_gap: 0.05,

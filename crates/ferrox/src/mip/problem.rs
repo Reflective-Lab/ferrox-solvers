@@ -4,6 +4,36 @@ use converge_pack::{ExecutionIdentity, FactPayload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum MipSolveStatus {
+    Optimal,
+    Feasible,
+    Infeasible,
+    Unbounded,
+    Timeout,
+    Error,
+    Invalid,
+}
+
+impl MipSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Optimal => "optimal",
+            Self::Feasible => "feasible",
+            Self::Infeasible => "infeasible",
+            Self::Unbounded => "unbounded",
+            Self::Timeout => "timeout",
+            Self::Error => "error",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VarKind {
     Continuous,
     Integer,
@@ -68,7 +98,7 @@ impl FactPayload for MipRequest {
 #[serde(deny_unknown_fields)]
 pub struct MipPlan {
     pub request_id: String,
-    pub status: String,
+    pub status: MipSolveStatus,
     pub values: Vec<(String, f64)>,
     pub objective_value: f64,
     pub mip_gap: f64,

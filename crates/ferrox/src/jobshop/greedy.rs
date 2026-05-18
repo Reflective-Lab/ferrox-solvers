@@ -6,7 +6,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::non_native_solver_identity;
 
-use super::problem::{JobShopPlan, JobShopRequest, ScheduledOp};
+use super::problem::{JobShopPlan, JobShopRequest, JobShopSolveStatus, ScheduledOp};
 
 pub(super) const REQUEST_PREFIX: &str = "jspbench-request:";
 const PLAN_PREFIX: &str = "jspbench-plan-greedy:";
@@ -208,7 +208,7 @@ pub fn solve_greedy(req: &JobShopRequest) -> JobShopPlan {
             "greedy-spt",
             "algorithm=shortest_processing_time",
         ),
-        status: "feasible".to_string(),
+        status: JobShopSolveStatus::Feasible,
         wall_time_seconds: t0.elapsed().as_secs_f64(),
     }
 }

@@ -2,6 +2,34 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LpSolveStatus {
+    Optimal,
+    Feasible,
+    Infeasible,
+    Unbounded,
+    Error,
+    Invalid,
+}
+
+impl LpSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Optimal => "optimal",
+            Self::Feasible => "feasible",
+            Self::Infeasible => "infeasible",
+            Self::Unbounded => "unbounded",
+            Self::Error => "error",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LpVariable {
@@ -59,7 +87,7 @@ impl FactPayload for LpRequest {
 #[serde(deny_unknown_fields)]
 pub struct LpPlan {
     pub request_id: String,
-    pub status: String,
+    pub status: LpSolveStatus,
     pub values: Vec<(String, f64)>,
     pub objective_value: f64,
     pub solver: String,

@@ -2,6 +2,23 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedulingSolveStatus {
+    Optimal,
+    Feasible,
+    Infeasible,
+    Unbounded,
+    Error,
+    Invalid,
+}
+
+impl SchedulingSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+}
+
 /// An agent that can execute tasks requiring one of its declared capabilities.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -76,8 +93,7 @@ pub struct SchedulingPlan {
     /// Short identifier for the algorithm that produced this plan.
     pub solver: String,
     pub execution_identity: ExecutionIdentity,
-    /// `"optimal"`, `"feasible"`, `"infeasible"`, or `"error"`.
-    pub status: String,
+    pub status: SchedulingSolveStatus,
     pub wall_time_seconds: f64,
 }
 
@@ -111,7 +127,7 @@ mod tests {
             makespan_min: 0,
             solver: "x".into(),
             execution_identity: non_native_solver_identity("x", "test"),
-            status: "feasible".into(),
+            status: SchedulingSolveStatus::Feasible,
             wall_time_seconds: 0.0,
         }
     }

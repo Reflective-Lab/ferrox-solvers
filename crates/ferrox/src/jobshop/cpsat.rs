@@ -11,7 +11,7 @@ use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
 use super::greedy::REQUEST_PREFIX;
-use super::problem::{JobShopPlan, JobShopRequest, ScheduledOp};
+use super::problem::{JobShopPlan, JobShopRequest, JobShopSolveStatus, ScheduledOp};
 
 const PLAN_PREFIX: &str = "jspbench-plan-cpsat:";
 
@@ -76,9 +76,9 @@ impl Suggestor for CpSatJobShopSuggestor {
             match fact.require_payload::<JobShopRequest>() {
                 Ok(req) => {
                     let plan = solve_cpsat_jsp(req);
-                    let confidence = match plan.status.as_str() {
-                        "optimal" => 1.0,
-                        "feasible" => 0.85,
+                    let confidence = match plan.status {
+                        JobShopSolveStatus::Optimal => 1.0,
+                        JobShopSolveStatus::Feasible => 0.85,
                         _ => 0.0,
                     };
                     proposals.push(
@@ -122,7 +122,7 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
     let t0 = Instant::now();
     if let Err(reason) = validate_jobshop_request(req) {
         warn!(request_id = %req.id, reason = %reason, "invalid jspbench-request");
-        return empty_plan(req, "invalid", t0.elapsed().as_secs_f64());
+        return empty_plan(req, JobShopSolveStatus::Invalid, t0.elapsed().as_secs_f64());
     }
 
     let horizon = req.horizon();
@@ -187,10 +187,10 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
     let elapsed = t0.elapsed().as_secs_f64();
 
     let status = match solution.status() {
-        OrtoolsStatus::Optimal => "optimal",
-        OrtoolsStatus::Feasible => "feasible",
-        OrtoolsStatus::Infeasible => "infeasible",
-        _ => "error",
+        OrtoolsStatus::Optimal => JobShopSolveStatus::Optimal,
+        OrtoolsStatus::Feasible => JobShopSolveStatus::Feasible,
+        OrtoolsStatus::Infeasible => JobShopSolveStatus::Infeasible,
+        _ => JobShopSolveStatus::Error,
     };
 
     if !solution.status().is_success() {
@@ -215,7 +215,7 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
     }
     schedule.sort_by_key(|s| (s.machine_id, s.start));
 
-    let lower_bound = if status == "optimal" {
+    let lower_bound = if status == JobShopSolveStatus::Optimal {
         Some(makespan)
     } else {
         None
@@ -228,7 +228,7 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
         lower_bound,
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: jobshop_cpsat_identity(req),
-        status: status.to_string(),
+        status,
         wall_time_seconds: elapsed,
     }
 }
@@ -270,7 +270,7 @@ fn validate_jobshop_request(req: &JobShopRequest) -> Result<(), String> {
     Ok(())
 }
 
-fn empty_plan(req: &JobShopRequest, status: &str, wall_time_seconds: f64) -> JobShopPlan {
+fn empty_plan(req: &JobShopRequest, status: JobShopSolveStatus, wall_time_seconds: f64) -> JobShopPlan {
     JobShopPlan {
         request_id: req.id.clone(),
         schedule: Vec::new(),
@@ -278,7 +278,7 @@ fn empty_plan(req: &JobShopRequest, status: &str, wall_time_seconds: f64) -> Job
         lower_bound: None,
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: jobshop_cpsat_identity(req),
-        status: status.to_string(),
+        status,
         wall_time_seconds,
     }
 }
@@ -294,7 +294,7 @@ fn jobshop_cpsat_identity(req: &JobShopRequest) -> ExecutionIdentity {
 #[allow(clippy::cast_possible_wrap, clippy::similar_names)]
 mod tests {
     use super::*;
-    use crate::jobshop::problem::{Job, Operation};
+    use crate::jobshop::problem::{Job, JobShopSolveStatus, Operation};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 
@@ -333,7 +333,7 @@ mod tests {
             5.0,
         );
         let plan = solve_cpsat_jsp(&r);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, JobShopSolveStatus::Optimal);
         assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
             plan.execution_identity
@@ -351,7 +351,7 @@ mod tests {
     fn rejects_invalid_operation_without_panic() {
         let r = req(vec![job(0, vec![op(2, 3)])], 1, 5.0);
         let plan = solve_cpsat_jsp(&r);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, JobShopSolveStatus::Invalid);
         assert!(plan.schedule.is_empty());
     }
 
@@ -438,9 +438,8 @@ mod tests {
         let plan = solve_cpsat_jsp(&r);
         let elapsed = started.elapsed().as_secs_f64();
         assert!(
-            matches!(plan.status.as_str(), "optimal" | "feasible"),
-            "stress should yield a feasible job-shop plan, got {} in {elapsed:.1}s",
-            plan.status
+            plan.status.is_successful(),
+            "stress should yield a feasible job-shop plan, got {elapsed:.1}s"
         );
         assert_eq!(plan.schedule.len(), n_jobs * n_machines);
         assert!(plan.makespan > 0);

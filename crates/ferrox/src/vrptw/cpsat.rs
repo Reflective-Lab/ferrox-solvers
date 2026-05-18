@@ -11,7 +11,7 @@ use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
 use super::greedy::REQUEST_PREFIX;
-use super::problem::{Customer, RouteStop, VrptwPlan, VrptwRequest};
+use super::problem::{Customer, RouteStop, VrptwPlan, VrptwRequest, VrptwSolveStatus};
 
 const PLAN_PREFIX: &str = "vrptw-plan-cpsat:";
 /// Distance scale factor: 1 unit = 0.01 distance units.
@@ -85,9 +85,9 @@ impl Suggestor for CpSatVrptwSuggestor {
             match fact.require_payload::<VrptwRequest>() {
                 Ok(req) => {
                     let plan = solve_cpsat_vrptw(req);
-                    let confidence = match plan.status.as_str() {
-                        "optimal" => plan.visit_ratio(),
-                        "feasible" => plan.visit_ratio() * 0.85,
+                    let confidence = match plan.status {
+                        VrptwSolveStatus::Optimal => plan.visit_ratio(),
+                        VrptwSolveStatus::Feasible => plan.visit_ratio() * 0.85,
                         _ => 0.0,
                     };
                     proposals.push(
@@ -138,7 +138,7 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
     let t0 = Instant::now();
     if let Err(reason) = validate_vrptw_request(req) {
         warn!(request_id = %req.id, reason = %reason, "invalid vrptw-request");
-        return empty_plan(req, "invalid", t0.elapsed().as_secs_f64());
+        return empty_plan(req, VrptwSolveStatus::Invalid, t0.elapsed().as_secs_f64());
     }
 
     let n = req.customers.len();
@@ -281,10 +281,10 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
     let elapsed = t0.elapsed().as_secs_f64();
 
     let status = match solution.status() {
-        OrtoolsStatus::Optimal => "optimal",
-        OrtoolsStatus::Feasible => "feasible",
-        OrtoolsStatus::Infeasible => "infeasible",
-        _ => "error",
+        OrtoolsStatus::Optimal => VrptwSolveStatus::Optimal,
+        OrtoolsStatus::Feasible => VrptwSolveStatus::Feasible,
+        OrtoolsStatus::Infeasible => VrptwSolveStatus::Infeasible,
+        _ => VrptwSolveStatus::Error,
     };
 
     if !solution.status().is_success() {
@@ -359,7 +359,7 @@ pub fn solve_cpsat_vrptw(req: &VrptwRequest) -> VrptwPlan {
         return_time,
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: vrptw_cpsat_identity(req),
-        status: status.to_string(),
+        status,
         wall_time_seconds: elapsed,
     }
 }
@@ -422,7 +422,7 @@ fn scaled_time(value: i64, label: &'static str) -> Result<i64, String> {
         .ok_or_else(|| format!("{label} overflows scaled i64 time"))
 }
 
-fn empty_plan(req: &VrptwRequest, status: &str, wall_time_seconds: f64) -> VrptwPlan {
+fn empty_plan(req: &VrptwRequest, status: VrptwSolveStatus, wall_time_seconds: f64) -> VrptwPlan {
     VrptwPlan {
         request_id: req.id.clone(),
         route: Vec::new(),
@@ -432,7 +432,7 @@ fn empty_plan(req: &VrptwRequest, status: &str, wall_time_seconds: f64) -> Vrptw
         return_time: 0,
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: vrptw_cpsat_identity(req),
-        status: status.to_string(),
+        status,
         wall_time_seconds,
     }
 }
@@ -453,7 +453,7 @@ fn vrptw_cpsat_identity(req: &VrptwRequest) -> ExecutionIdentity {
 mod tests {
     use super::*;
     use crate::test_support::MockContext;
-    use crate::vrptw::problem::{Customer, Depot};
+    use crate::vrptw::problem::{Customer, Depot, VrptwSolveStatus};
     use converge_pack::TextPayload;
 
     fn customer(id: usize, x: f64, y: f64, open: i64, close: i64) -> Customer {
@@ -494,7 +494,7 @@ mod tests {
             5.0,
         );
         let plan = solve_cpsat_vrptw(&r);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, VrptwSolveStatus::Optimal);
         assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
             plan.execution_identity
@@ -519,7 +519,7 @@ mod tests {
             5.0,
         );
         let plan = solve_cpsat_vrptw(&r);
-        assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
+        assert!(plan.status.is_successful());
         // At least one customer skipped; visit count <= 1.
         assert!(plan.customers_visited <= 1);
     }
@@ -528,7 +528,7 @@ mod tests {
     fn rejects_invalid_time_window_without_panic() {
         let r = req(vec![customer(1, 1.0, 0.0, 50, 10)], 200, 5.0);
         let plan = solve_cpsat_vrptw(&r);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, VrptwSolveStatus::Invalid);
         assert!(plan.route.is_empty());
     }
 
@@ -593,9 +593,8 @@ mod tests {
         let plan = solve_cpsat_vrptw(&r);
         let elapsed = started.elapsed().as_secs_f64();
         assert!(
-            matches!(plan.status.as_str(), "optimal" | "feasible"),
-            "stress should yield a feasible VRPTW plan, got {} in {elapsed:.1}s",
-            plan.status
+            plan.status.is_successful(),
+            "stress should yield a feasible VRPTW plan, got {elapsed:.1}s"
         );
         assert_eq!(plan.customers_total, n);
         assert!(plan.customers_visited > 0);

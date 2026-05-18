@@ -6,7 +6,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::non_native_solver_identity;
 
-use super::problem::{RouteStop, VrptwPlan, VrptwRequest};
+use super::problem::{RouteStop, VrptwPlan, VrptwRequest, VrptwSolveStatus};
 
 pub(super) const REQUEST_PREFIX: &str = "vrptw-request:";
 const PLAN_PREFIX: &str = "vrptw-plan-greedy:";
@@ -178,7 +178,7 @@ pub fn solve_nn(req: &VrptwRequest) -> VrptwPlan {
             "nearest-neighbour",
             "algorithm=nearest_neighbour",
         ),
-        status: "feasible".to_string(),
+        status: VrptwSolveStatus::Feasible,
         wall_time_seconds: t0.elapsed().as_secs_f64(),
     }
 }

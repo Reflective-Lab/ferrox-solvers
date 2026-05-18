@@ -10,7 +10,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::highs_solver_identity;
 
-use super::problem::{MipPlan, MipRequest, MipTerm, VarKind};
+use super::problem::{MipPlan, MipRequest, MipSolveStatus, MipTerm, VarKind};
 
 const REQUEST_PREFIX: &str = "mip-request:";
 const PLAN_PREFIX: &str = "mip-plan:";
@@ -57,9 +57,9 @@ impl Suggestor for HighsMipSuggestor {
             match fact.require_payload::<MipRequest>() {
                 Ok(req) => {
                     let plan = solve_mip(req);
-                    let confidence = match plan.status.as_str() {
-                        "optimal" => 1.0,
-                        "feasible" => 0.6 + (1.0 - plan.mip_gap.min(1.0)) * 0.3,
+                    let confidence = match plan.status {
+                        MipSolveStatus::Optimal => 1.0,
+                        MipSolveStatus::Feasible => 0.6 + (1.0 - plan.mip_gap.min(1.0)) * 0.3,
                         _ => 0.0,
                     };
                     proposals.push(
@@ -170,17 +170,19 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
     };
     let has_solution = solver.has_solution();
 
-    let status_str = match status {
-        HighsModelStatus::Optimal => "optimal",
-        HighsModelStatus::SolutionLimit | HighsModelStatus::TimeLimit if has_solution => "feasible",
-        HighsModelStatus::TimeLimit => "timeout",
-        HighsModelStatus::Infeasible => "infeasible",
-        HighsModelStatus::Unbounded => "unbounded",
-        _ => "error",
+    let plan_status = match status {
+        HighsModelStatus::Optimal => MipSolveStatus::Optimal,
+        HighsModelStatus::SolutionLimit | HighsModelStatus::TimeLimit if has_solution => {
+            MipSolveStatus::Feasible
+        }
+        HighsModelStatus::TimeLimit => MipSolveStatus::Timeout,
+        HighsModelStatus::Infeasible => MipSolveStatus::Infeasible,
+        HighsModelStatus::Unbounded => MipSolveStatus::Unbounded,
+        _ => MipSolveStatus::Error,
     };
 
     let solution_usable = status.is_optimal()
-        || (status.may_have_incumbent() && has_solution && status_str == "feasible");
+        || (status.may_have_incumbent() && has_solution && plan_status == MipSolveStatus::Feasible);
 
     let (values, objective_value, mip_gap) = if solution_usable {
         let mut vals = Vec::with_capacity(req.variables.len());
@@ -203,7 +205,7 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
 
     MipPlan {
         request_id: req.id.clone(),
-        status: status_str.to_string(),
+        status: plan_status,
         values,
         objective_value,
         mip_gap,
@@ -215,7 +217,7 @@ pub fn solve_mip(req: &MipRequest) -> MipPlan {
 fn invalid_plan(req: &MipRequest) -> MipPlan {
     MipPlan {
         request_id: req.id.clone(),
-        status: "invalid".to_string(),
+        status: MipSolveStatus::Invalid,
         values: Vec::new(),
         objective_value: 0.0,
         mip_gap: f64::INFINITY,
@@ -228,7 +230,7 @@ fn solver_error_plan(req: &MipRequest, err: &HighsError) -> MipPlan {
     warn!(request_id = %req.id, error = %err, "mip solver failed");
     MipPlan {
         request_id: req.id.clone(),
-        status: "error".to_string(),
+        status: MipSolveStatus::Error,
         values: Vec::new(),
         objective_value: 0.0,
         mip_gap: f64::INFINITY,
@@ -329,7 +331,7 @@ fn validate_bound(value: f64, label: &'static str) -> Result<(), String> {
 )]
 mod tests {
     use super::*;
-    use crate::mip::problem::{MipConstraint, MipObjective, MipTerm, MipVariable, VarKind};
+    use crate::mip::problem::{MipConstraint, MipObjective, MipSolveStatus, MipTerm, MipVariable, VarKind};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 
@@ -385,7 +387,7 @@ mod tests {
     fn solves_small_knapsack_optimally() {
         let req = knapsack(4, 10.0, &[2.0, 3.0, 4.0, 5.0], &[3.0, 4.0, 5.0, 6.0]);
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, MipSolveStatus::Optimal);
         assert_eq!(plan.execution_identity.backend, "highs-v1.14.0");
         assert_eq!(
             plan.execution_identity
@@ -418,7 +420,7 @@ mod tests {
             mip_gap_tolerance: None,
         };
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, MipSolveStatus::Optimal);
         assert!((plan.objective_value - 4.0).abs() < 1e-6);
     }
 
@@ -447,7 +449,7 @@ mod tests {
             mip_gap_tolerance: Some(0.001),
         };
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, MipSolveStatus::Optimal);
         let map: HashMap<_, _> = plan.values.iter().cloned().collect();
         assert!((map["x"] - 7.0).abs() < 1e-6);
     }
@@ -471,7 +473,7 @@ mod tests {
             mip_gap_tolerance: None,
         };
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "infeasible");
+        assert_eq!(plan.status, MipSolveStatus::Infeasible);
         assert!(plan.mip_gap.is_infinite());
         assert_eq!(plan.values.len(), 0);
     }
@@ -495,7 +497,7 @@ mod tests {
             mip_gap_tolerance: None,
         };
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, MipSolveStatus::Invalid);
         assert!(plan.values.is_empty());
     }
 
@@ -513,7 +515,7 @@ mod tests {
             mip_gap_tolerance: None,
         };
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, MipSolveStatus::Invalid);
         assert!(plan.values.is_empty());
     }
 
@@ -532,7 +534,7 @@ mod tests {
         };
 
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, MipSolveStatus::Invalid);
         assert!(plan.values.is_empty());
     }
 
@@ -541,12 +543,12 @@ mod tests {
         let mut req = knapsack(1, 1.0, &[1.0], &[1.0]);
         req.time_limit_seconds = Some(0.0);
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, MipSolveStatus::Invalid);
 
         let mut req = knapsack(1, 1.0, &[1.0], &[1.0]);
         req.mip_gap_tolerance = Some(f64::NAN);
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, MipSolveStatus::Invalid);
     }
 
     #[test]
@@ -569,7 +571,7 @@ mod tests {
             mip_gap_tolerance: None,
         };
         let plan = solve_mip(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, MipSolveStatus::Optimal);
         assert!((plan.objective_value - 3.0).abs() < 1e-6);
     }
 
@@ -636,9 +638,8 @@ mod tests {
         let plan = solve_mip(&req);
         let elapsed = started.elapsed().as_secs_f64();
         assert!(
-            matches!(plan.status.as_str(), "optimal" | "feasible"),
-            "stress should yield a feasible MIP solution, got {} in {elapsed:.1}s",
-            plan.status
+            plan.status.is_successful(),
+            "stress should yield a feasible MIP solution, got {elapsed:.1}s"
         );
         assert_eq!(plan.values.len(), n);
         assert!(plan.objective_value > 0.0);

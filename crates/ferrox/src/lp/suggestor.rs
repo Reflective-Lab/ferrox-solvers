@@ -10,7 +10,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::glop_solver_identity;
 
-use super::problem::{LpPlan, LpRequest};
+use super::problem::{LpPlan, LpRequest, LpSolveStatus};
 
 const REQUEST_PREFIX: &str = "glop-request:";
 const PLAN_PREFIX: &str = "glop-plan:";
@@ -57,9 +57,9 @@ impl Suggestor for GlopLpSuggestor {
             match fact.require_payload::<LpRequest>() {
                 Ok(req) => {
                     let plan = solve_lp(req);
-                    let confidence = match plan.status.as_str() {
-                        "optimal" => 1.0,
-                        "feasible" => 0.7,
+                    let confidence = match plan.status {
+                        LpSolveStatus::Optimal => 1.0,
+                        LpSolveStatus::Feasible => 0.7,
                         _ => 0.0,
                     };
                     proposals.push(
@@ -100,18 +100,18 @@ fn plan_exists(ctx: &dyn Context, request_id: &str) -> bool {
 pub fn solve_lp(req: &LpRequest) -> LpPlan {
     if let Err(reason) = validate_lp_request(req) {
         warn!(request_id = %req.id, reason = %reason, "invalid glop-request");
-        return empty_plan(req, "invalid");
+        return empty_plan(req, LpSolveStatus::Invalid);
     }
 
     match solve_lp_checked(req) {
         Ok(plan) => plan,
         Err(OrtoolsError::InvalidInput(reason)) => {
             warn!(request_id = %req.id, reason = %reason, "invalid glop-request");
-            empty_plan(req, "invalid")
+            empty_plan(req, LpSolveStatus::Invalid)
         }
         Err(error) => {
             warn!(request_id = %req.id, error = %error, "GLOP native solve failed");
-            empty_plan(req, "error")
+            empty_plan(req, LpSolveStatus::Error)
         }
     }
 }
@@ -146,11 +146,11 @@ fn solve_lp_checked(req: &LpRequest) -> Result<LpPlan, OrtoolsError> {
 
     let solve_status = solver.try_solve()?;
     let status = match solve_status {
-        OrtoolsStatus::Optimal => "optimal",
-        OrtoolsStatus::Feasible => "feasible",
-        OrtoolsStatus::Infeasible => "infeasible",
-        OrtoolsStatus::Unbounded => "unbounded",
-        _ => "error",
+        OrtoolsStatus::Optimal => LpSolveStatus::Optimal,
+        OrtoolsStatus::Feasible => LpSolveStatus::Feasible,
+        OrtoolsStatus::Infeasible => LpSolveStatus::Infeasible,
+        OrtoolsStatus::Unbounded => LpSolveStatus::Unbounded,
+        _ => LpSolveStatus::Error,
     };
 
     let values: Vec<(String, f64)> = if solve_status.is_success() {
@@ -173,7 +173,7 @@ fn solve_lp_checked(req: &LpRequest) -> Result<LpPlan, OrtoolsError> {
 
     Ok(LpPlan {
         request_id: req.id.clone(),
-        status: status.to_string(),
+        status,
         values,
         objective_value,
         solver: "glop-v9.15".to_string(),
@@ -249,10 +249,10 @@ fn validate_terms(terms: &[super::problem::LpTerm], vars: &HashSet<&str>) -> Res
     Ok(())
 }
 
-fn empty_plan(req: &LpRequest, status: &'static str) -> LpPlan {
+fn empty_plan(req: &LpRequest, status: LpSolveStatus) -> LpPlan {
     LpPlan {
         request_id: req.id.clone(),
-        status: status.to_string(),
+        status,
         values: Vec::new(),
         objective_value: 0.0,
         solver: "glop-v9.15".to_string(),
@@ -274,7 +274,7 @@ fn lp_identity(req: &LpRequest) -> ExecutionIdentity {
 #[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
-    use crate::lp::problem::{LpConstraint, LpObjective, LpTerm, LpVariable};
+    use crate::lp::problem::{LpConstraint, LpObjective, LpSolveStatus, LpTerm, LpVariable};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 
@@ -320,7 +320,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_lp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, LpSolveStatus::Optimal);
         assert!((plan.objective_value - 14.0 / 5.0).abs() < 1e-6);
         assert_eq!(plan.solver, "glop-v9.15");
         assert_eq!(plan.execution_identity.backend, "glop-v9.15");
@@ -351,7 +351,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_lp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, LpSolveStatus::Optimal);
         assert!((plan.objective_value - 2.0).abs() < 1e-6);
     }
 
@@ -374,7 +374,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_lp(&req);
-        assert_eq!(plan.status, "infeasible");
+        assert_eq!(plan.status, LpSolveStatus::Infeasible);
         assert_eq!(plan.objective_value, 0.0);
     }
 
@@ -396,7 +396,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_lp(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, LpSolveStatus::Invalid);
         assert!(plan.values.is_empty());
     }
 
@@ -413,7 +413,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_lp(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, LpSolveStatus::Invalid);
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_lp(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, LpSolveStatus::Invalid);
     }
 
     #[tokio::test]
@@ -551,9 +551,8 @@ mod tests {
         let plan = solve_lp(&req);
         let elapsed = started.elapsed().as_secs_f64();
         assert!(
-            matches!(plan.status.as_str(), "optimal" | "feasible"),
-            "stress should yield a feasible/optimal LP, got {} in {elapsed:.1}s",
-            plan.status
+            plan.status.is_successful(),
+            "stress should yield a feasible/optimal LP, got {elapsed:.1}s"
         );
         assert_eq!(plan.values.len(), n_vars);
     }

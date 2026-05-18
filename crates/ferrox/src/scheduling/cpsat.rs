@@ -11,7 +11,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
-use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingTask, TaskAssignment};
+use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingSolveStatus, SchedulingTask, TaskAssignment};
 
 const PLAN_PREFIX: &str = "scheduling-plan-cpsat:";
 
@@ -80,9 +80,9 @@ impl Suggestor for CpSatSchedulerSuggestor {
             match fact.require_payload::<SchedulingRequest>() {
                 Ok(req) => {
                     let plan = solve_cpsat(req);
-                    let confidence = match plan.status.as_str() {
-                        "optimal" => plan.throughput_ratio(),
-                        "feasible" => plan.throughput_ratio() * 0.85,
+                    let confidence = match plan.status {
+                        SchedulingSolveStatus::Optimal => plan.throughput_ratio(),
+                        SchedulingSolveStatus::Feasible => plan.throughput_ratio() * 0.85,
                         _ => 0.0,
                     };
                     proposals.push(
@@ -129,7 +129,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     let t0 = Instant::now();
     if let Err(reason) = validate_scheduling_request(req) {
         warn!(request_id = %req.id, reason = %reason, "invalid scheduling-request");
-        return empty_plan(req, "invalid", t0.elapsed().as_secs_f64());
+        return empty_plan(req, SchedulingSolveStatus::Invalid, t0.elapsed().as_secs_f64());
     }
 
     let mut model = CpModel::new();
@@ -218,11 +218,11 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     let elapsed = t0.elapsed().as_secs_f64();
 
     let status = match solution.status() {
-        OrtoolsStatus::Optimal => "optimal",
-        OrtoolsStatus::Feasible => "feasible",
-        OrtoolsStatus::Infeasible => "infeasible",
-        OrtoolsStatus::Unbounded => "unbounded",
-        _ => "error",
+        OrtoolsStatus::Optimal => SchedulingSolveStatus::Optimal,
+        OrtoolsStatus::Feasible => SchedulingSolveStatus::Feasible,
+        OrtoolsStatus::Infeasible => SchedulingSolveStatus::Infeasible,
+        OrtoolsStatus::Unbounded => SchedulingSolveStatus::Unbounded,
+        _ => SchedulingSolveStatus::Error,
     };
 
     if !solution.status().is_success() {
@@ -270,7 +270,7 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
         makespan_min: makespan,
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: scheduling_cpsat_identity(req),
-        status: status.to_string(),
+        status,
         wall_time_seconds: elapsed,
     }
 }
@@ -313,7 +313,7 @@ fn feasible_window(task: &SchedulingTask) -> Option<(i64, i64)> {
         .then_some((latest_start, earliest_end))
 }
 
-fn empty_plan(req: &SchedulingRequest, status: &str, wall_time_seconds: f64) -> SchedulingPlan {
+fn empty_plan(req: &SchedulingRequest, status: SchedulingSolveStatus, wall_time_seconds: f64) -> SchedulingPlan {
     SchedulingPlan {
         request_id: req.id.clone(),
         assignments: Vec::new(),
@@ -322,7 +322,7 @@ fn empty_plan(req: &SchedulingRequest, status: &str, wall_time_seconds: f64) -> 
         makespan_min: 0,
         solver: "cp-sat-v9.15".to_string(),
         execution_identity: scheduling_cpsat_identity(req),
-        status: status.to_string(),
+        status,
         wall_time_seconds,
     }
 }
@@ -354,7 +354,7 @@ fn scheduling_cpsat_identity(req: &SchedulingRequest) -> ExecutionIdentity {
 )]
 mod tests {
     use super::*;
-    use crate::scheduling::problem::{SchedulingAgent, SchedulingTask};
+    use crate::scheduling::problem::{SchedulingAgent, SchedulingSolveStatus, SchedulingTask};
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 
@@ -398,7 +398,7 @@ mod tests {
             vec![agent(0, &["py"])],
         );
         let plan = solve_cpsat(&r);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, SchedulingSolveStatus::Optimal);
         assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
         assert!(
             plan.execution_identity
@@ -426,7 +426,7 @@ mod tests {
         let mut r = req(vec![task(1, "py", 10, 0, 30)], vec![agent(0, &["py"])]);
         r.time_limit_seconds = f64::NAN;
         let plan = solve_cpsat(&r);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, SchedulingSolveStatus::Invalid);
         assert!(plan.assignments.is_empty());
     }
 
@@ -534,9 +534,8 @@ mod tests {
         let plan = solve_cpsat(&r);
         let elapsed = started.elapsed().as_secs_f64();
         assert!(
-            matches!(plan.status.as_str(), "optimal" | "feasible"),
-            "stress should yield a feasible scheduling plan, got {} in {elapsed:.1}s",
-            plan.status
+            plan.status.is_successful(),
+            "stress should yield a feasible scheduling plan, got {elapsed:.1}s"
         );
         assert!(plan.tasks_scheduled > 0);
         for a in &plan.assignments {

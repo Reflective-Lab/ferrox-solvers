@@ -2,6 +2,34 @@ use serde::{Deserialize, Serialize};
 
 use converge_pack::{ExecutionIdentity, FactPayload};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CpSolveStatus {
+    Optimal,
+    Feasible,
+    Infeasible,
+    Unbounded,
+    Error,
+    Invalid,
+}
+
+impl CpSolveStatus {
+    pub fn is_successful(self) -> bool {
+        matches!(self, Self::Optimal | Self::Feasible)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Optimal => "optimal",
+            Self::Feasible => "feasible",
+            Self::Infeasible => "infeasible",
+            Self::Unbounded => "unbounded",
+            Self::Error => "error",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
 /// A single integer variable in a CP-SAT model.
 /// Set `is_bool = true` for binary (0/1) variables that may serve as
 /// optional-interval literals; the solver treats them as `BoolVar` internally.
@@ -161,7 +189,7 @@ impl FactPayload for CpSatRequest {
 #[serde(deny_unknown_fields)]
 pub struct CpSatPlan {
     pub request_id: String,
-    pub status: String,
+    pub status: CpSolveStatus,
     pub assignments: Vec<(String, i64)>,
     pub objective_value: Option<i64>,
     pub wall_time_seconds: f64,

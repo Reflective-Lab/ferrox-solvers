@@ -10,7 +10,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
-use super::problem::{ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpTerm};
+use super::problem::{ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpSolveStatus, CpTerm};
 
 const REQUEST_PREFIX: &str = "cpsat-request:";
 const PLAN_PREFIX: &str = "cpsat-plan:";
@@ -57,9 +57,9 @@ impl Suggestor for CpSatSuggestor {
             match fact.require_payload::<CpSatRequest>() {
                 Ok(req) => {
                     let plan = solve_cp(req);
-                    let confidence = match plan.status.as_str() {
-                        "optimal" => 1.0,
-                        "feasible" => 0.7,
+                    let confidence = match plan.status {
+                        CpSolveStatus::Optimal => 1.0,
+                        CpSolveStatus::Feasible => 0.7,
                         _ => 0.0,
                     };
                     proposals.push(
@@ -238,11 +238,11 @@ fn solve_cp_checked(req: &CpSatRequest) -> Result<CpSatPlan, OrtoolsError> {
     let solution = model.try_solve(time_limit)?;
 
     let status = match solution.status() {
-        OrtoolsStatus::Optimal => "optimal",
-        OrtoolsStatus::Feasible => "feasible",
-        OrtoolsStatus::Infeasible => "infeasible",
-        OrtoolsStatus::Unbounded => "unbounded",
-        _ => "error",
+        OrtoolsStatus::Optimal => CpSolveStatus::Optimal,
+        OrtoolsStatus::Feasible => CpSolveStatus::Feasible,
+        OrtoolsStatus::Infeasible => CpSolveStatus::Infeasible,
+        OrtoolsStatus::Unbounded => CpSolveStatus::Unbounded,
+        _ => CpSolveStatus::Error,
     };
 
     let assignments = if solution.status().is_success() {
@@ -265,7 +265,7 @@ fn solve_cp_checked(req: &CpSatRequest) -> Result<CpSatPlan, OrtoolsError> {
 
     Ok(CpSatPlan {
         request_id: req.id.clone(),
-        status: status.to_string(),
+        status,
         assignments,
         objective_value,
         wall_time_seconds: solution.wall_time(),
@@ -275,17 +275,17 @@ fn solve_cp_checked(req: &CpSatRequest) -> Result<CpSatPlan, OrtoolsError> {
 }
 
 fn invalid_plan(req: &CpSatRequest) -> CpSatPlan {
-    empty_plan(req, "invalid")
+    empty_plan(req, CpSolveStatus::Invalid)
 }
 
 fn error_plan(req: &CpSatRequest) -> CpSatPlan {
-    empty_plan(req, "error")
+    empty_plan(req, CpSolveStatus::Error)
 }
 
-fn empty_plan(req: &CpSatRequest, status: &'static str) -> CpSatPlan {
+fn empty_plan(req: &CpSatRequest, status: CpSolveStatus) -> CpSatPlan {
     CpSatPlan {
         request_id: req.id.clone(),
-        status: status.to_string(),
+        status,
         assignments: Vec::new(),
         objective_value: None,
         wall_time_seconds: 0.0,
@@ -591,8 +591,8 @@ fn bool_literal_to_ref(
 mod tests {
     use super::*;
     use crate::cp::problem::{
-        CpBoolLiteral, CpTerm, CpVariable, CumulativeDemand, IntervalVarDef, NoOverlap2DRectangle,
-        OptionalIntervalVarDef,
+        CpBoolLiteral, CpSolveStatus, CpTerm, CpVariable, CumulativeDemand, IntervalVarDef,
+        NoOverlap2DRectangle, OptionalIntervalVarDef,
     };
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
@@ -665,7 +665,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
+        assert!(plan.status.is_successful());
         assert_eq!(plan.assignments.len(), 4);
         assert_eq!(plan.solver, "cp-sat-v9.15");
         assert_eq!(plan.execution_identity.backend, "cp-sat-v9.15");
@@ -693,7 +693,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, CpSolveStatus::Optimal);
         // optimal: maximize 3x+2y s.t. x+y<=8, x,y in [0,10] -> x=8, y=0, obj=24
         assert_eq!(plan.objective_value, Some(24));
     }
@@ -720,7 +720,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "infeasible");
+        assert_eq!(plan.status, CpSolveStatus::Infeasible);
         assert_eq!(plan.assignments.len(), 0);
     }
 
@@ -740,7 +740,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_cp(&req);
-        assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
+        assert!(plan.status.is_successful());
         let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
         assert_eq!(map["x"] + map["y"], 7);
     }
@@ -784,7 +784,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, CpSolveStatus::Optimal);
         let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
         assert_eq!(map["a"], 1);
         assert_eq!(map["b"], 0);
@@ -813,7 +813,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "infeasible");
+        assert_eq!(plan.status, CpSolveStatus::Infeasible);
         assert!(plan.assignments.is_empty());
     }
 
@@ -838,7 +838,7 @@ mod tests {
                 time_limit_seconds: Some(2.0),
             };
             let plan = solve_cp(&req);
-            let feasible = matches!(plan.status.as_str(), "optimal" | "feasible");
+            let feasible = plan.status.is_successful();
             let should_be_feasible = !a_value || b_value;
             assert_eq!(feasible, should_be_feasible, "a={a_value}, b={b_value}");
         }
@@ -860,7 +860,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, CpSolveStatus::Optimal);
         let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
         assert_eq!((map["x"], map["y"]), (0, 2));
     }
@@ -887,7 +887,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "infeasible");
+        assert_eq!(plan.status, CpSolveStatus::Infeasible);
     }
 
     #[test]
@@ -924,7 +924,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, CpSolveStatus::Optimal);
         // Minimising e2 alone: iv2 schedules first (0..7), iv1 after (7..12). e2 = 7.
         assert_eq!(plan.objective_value, Some(7));
         let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
@@ -978,7 +978,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, CpSolveStatus::Optimal);
         let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
         let (s1, e1, s2, e2) = (map["s1"], map["e1"], map["s2"], map["e2"]);
         assert_eq!(e1 - s1, 5);
@@ -1044,7 +1044,7 @@ mod tests {
             time_limit_seconds: Some(2.0),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "optimal");
+        assert_eq!(plan.status, CpSolveStatus::Optimal);
         let map: HashMap<_, _> = plan.assignments.iter().cloned().collect();
         assert!(map["x1e"] <= map["x2s"] || map["x2e"] <= map["x1s"]);
     }
@@ -1069,7 +1069,7 @@ mod tests {
             time_limit_seconds: Some(1.0),
         };
         let plan = solve_cp(&req);
-        assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
+        assert!(plan.status.is_successful());
     }
 
     #[test]
@@ -1096,7 +1096,7 @@ mod tests {
             time_limit_seconds: Some(0.5),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, CpSolveStatus::Invalid);
         assert!(plan.assignments.is_empty());
     }
 
@@ -1113,7 +1113,7 @@ mod tests {
             time_limit_seconds: Some(0.5),
         };
         let plan = solve_cp(&req);
-        assert_eq!(plan.status, "invalid");
+        assert_eq!(plan.status, CpSolveStatus::Invalid);
         assert!(plan.objective_value.is_none());
     }
 
@@ -1130,7 +1130,7 @@ mod tests {
             time_limit_seconds: Some(0.5),
         };
         let plan = solve_cp(&req);
-        assert!(matches!(plan.status.as_str(), "optimal" | "feasible"));
+        assert!(plan.status.is_successful());
         assert!(plan.objective_value.is_none());
     }
 
@@ -1238,9 +1238,8 @@ mod tests {
         let plan = solve_cp(&req);
         let elapsed = started.elapsed().as_secs_f64();
         assert!(
-            matches!(plan.status.as_str(), "optimal" | "feasible"),
-            "stress should yield a feasible solution, got {} in {elapsed:.1}s",
-            plan.status
+            plan.status.is_successful(),
+            "stress should yield a feasible solution, got {elapsed:.1}s"
         );
         assert_eq!(plan.assignments.len(), n);
         assert!(plan.objective_value.unwrap() > 0);

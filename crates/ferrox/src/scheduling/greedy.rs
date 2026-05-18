@@ -6,7 +6,7 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::non_native_solver_identity;
 
-use super::problem::{SchedulingPlan, SchedulingRequest, TaskAssignment};
+use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingSolveStatus, TaskAssignment};
 
 pub(super) const REQUEST_PREFIX: &str = "scheduling-request:";
 const PLAN_PREFIX: &str = "scheduling-plan-greedy:";
@@ -154,7 +154,7 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
             "greedy-edf",
             "algorithm=edf_earliest_available",
         ),
-        status: "feasible".to_string(),
+        status: SchedulingSolveStatus::Feasible,
         wall_time_seconds: t0.elapsed().as_secs_f64(),
     }
 }
