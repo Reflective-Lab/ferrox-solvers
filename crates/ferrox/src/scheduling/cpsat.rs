@@ -12,7 +12,9 @@ use crate::domain_types::Minutes;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
-use super::problem::{SchedulingPlan, SchedulingRequest, SchedulingSolveStatus, SchedulingTask, TaskAssignment};
+use super::problem::{
+    SchedulingPlan, SchedulingRequest, SchedulingSolveStatus, SchedulingTask, TaskAssignment,
+};
 
 const PLAN_PREFIX: &str = "scheduling-plan-cpsat:";
 
@@ -130,7 +132,11 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     let t0 = Instant::now();
     if let Err(reason) = validate_scheduling_request(req) {
         warn!(request_id = %req.id, reason = %reason, "invalid scheduling-request");
-        return empty_plan(req, SchedulingSolveStatus::Invalid, t0.elapsed().as_secs_f64());
+        return empty_plan(
+            req,
+            SchedulingSolveStatus::Invalid,
+            t0.elapsed().as_secs_f64(),
+        );
     }
 
     let mut model = CpModel::new();
@@ -260,7 +266,11 @@ pub fn solve_cpsat(req: &SchedulingRequest) -> SchedulingPlan {
     }
 
     assignments.sort_by_key(|a| a.start_min);
-    let makespan = assignments.iter().map(|a| a.end_min).max().unwrap_or(Minutes(0));
+    let makespan = assignments
+        .iter()
+        .map(|a| a.end_min)
+        .max()
+        .unwrap_or(Minutes(0));
     let scheduled = assignments.len();
 
     SchedulingPlan {
@@ -314,7 +324,11 @@ fn feasible_window(task: &SchedulingTask) -> Option<(i64, i64)> {
         .then_some((latest_start, earliest_end))
 }
 
-fn empty_plan(req: &SchedulingRequest, status: SchedulingSolveStatus, wall_time_seconds: f64) -> SchedulingPlan {
+fn empty_plan(
+    req: &SchedulingRequest,
+    status: SchedulingSolveStatus,
+    wall_time_seconds: f64,
+) -> SchedulingPlan {
     SchedulingPlan {
         request_id: req.id.clone(),
         assignments: Vec::new(),

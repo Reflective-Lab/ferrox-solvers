@@ -10,7 +10,9 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::cp_sat_solver_identity;
 
-use super::problem::{ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpSolveStatus, CpTerm};
+use super::problem::{
+    ConstraintKind, CpBoolLiteral, CpSatPlan, CpSatRequest, CpSolveStatus, CpTerm,
+};
 
 const REQUEST_PREFIX: &str = "cpsat-request:";
 const PLAN_PREFIX: &str = "cpsat-plan:";

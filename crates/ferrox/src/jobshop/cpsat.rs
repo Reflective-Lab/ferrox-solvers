@@ -140,7 +140,8 @@ pub fn solve_cpsat_jsp(req: &JobShopRequest) -> JobShopPlan {
         for (k, op) in job.operations.iter().enumerate() {
             let s = model.new_int_var(0, horizon, &format!("s_{}_{k}", job.id.0));
             let e = model.new_int_var(op.duration.0, horizon, &format!("e_{}_{k}", job.id.0));
-            let iv = model.new_fixed_interval_var(s, op.duration.0, e, &format!("iv_{}_{k}", job.id.0));
+            let iv =
+                model.new_fixed_interval_var(s, op.duration.0, e, &format!("iv_{}_{k}", job.id.0));
             js.push(s);
             je.push(e);
             ji.push(iv);
@@ -270,7 +271,11 @@ fn validate_jobshop_request(req: &JobShopRequest) -> Result<(), String> {
     Ok(())
 }
 
-fn empty_plan(req: &JobShopRequest, status: JobShopSolveStatus, wall_time_seconds: f64) -> JobShopPlan {
+fn empty_plan(
+    req: &JobShopRequest,
+    status: JobShopSolveStatus,
+    wall_time_seconds: f64,
+) -> JobShopPlan {
     JobShopPlan {
         request_id: req.id.clone(),
         schedule: Vec::new(),

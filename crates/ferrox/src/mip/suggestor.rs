@@ -331,7 +331,9 @@ fn validate_bound(value: f64, label: &'static str) -> Result<(), String> {
 )]
 mod tests {
     use super::*;
-    use crate::mip::problem::{MipConstraint, MipObjective, MipSolveStatus, MipTerm, MipVariable, VarKind};
+    use crate::mip::problem::{
+        MipConstraint, MipObjective, MipSolveStatus, MipTerm, MipVariable, VarKind,
+    };
     use crate::test_support::MockContext;
     use converge_pack::TextPayload;
 

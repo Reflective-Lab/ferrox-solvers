@@ -142,7 +142,11 @@ pub fn solve_greedy(req: &SchedulingRequest) -> SchedulingPlan {
     }
 
     assignments.sort_by_key(|a| a.start_min);
-    let makespan = assignments.iter().map(|a| a.end_min).max().unwrap_or(Minutes(0));
+    let makespan = assignments
+        .iter()
+        .map(|a| a.end_min)
+        .max()
+        .unwrap_or(Minutes(0));
     let scheduled = assignments.len();
 
     SchedulingPlan {

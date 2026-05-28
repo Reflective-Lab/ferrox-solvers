@@ -9,7 +9,9 @@ use tracing::warn;
 use crate::provenance::FERROX_PROVENANCE;
 use crate::solver_identity::min_cost_flow_solver_identity;
 
-use super::problem::{FlowArc, FlowArcPlan, FlowSolveMode, FlowSolveStatus, MinCostFlowPlan, MinCostFlowRequest};
+use super::problem::{
+    FlowArc, FlowArcPlan, FlowSolveMode, FlowSolveStatus, MinCostFlowPlan, MinCostFlowRequest,
+};
 
 const REQUEST_PREFIX: &str = "network-flow-request:";
 const PLAN_PREFIX: &str = "network-flow-plan-ortools:";
@@ -307,7 +309,10 @@ mod tests {
     }
 
     fn supply(node: i32, supply: i64) -> NodeSupply {
-        NodeSupply { node: NodeId(node), supply }
+        NodeSupply {
+            node: NodeId(node),
+            supply,
+        }
     }
 
     fn balanced_request(id: &str) -> MinCostFlowRequest {
