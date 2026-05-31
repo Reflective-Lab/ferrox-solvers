@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use converge_pack::{AgentEffect, Context, ContextKey, ProvenanceSource, Suggestor};
+use converge_pack::{AgentEffect, Context, ContextKey, Provenance, ProvenanceSource, Suggestor};
 use std::time::Instant;
 use tracing::warn;
 
@@ -41,8 +41,8 @@ impl Suggestor for NearestNeighborSuggestor {
         })
     }
 
-    fn provenance(&self) -> &'static str {
-        FERROX_PROVENANCE.as_str()
+    fn provenance(&self) -> Provenance {
+        Provenance::from(FERROX_PROVENANCE.as_str())
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {

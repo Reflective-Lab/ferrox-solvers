@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use converge_pack::{
-    AgentEffect, Context, ContextKey, ExecutionIdentity, ProvenanceSource, Suggestor,
+    AgentEffect, Context, ContextKey, ExecutionIdentity, Provenance, ProvenanceSource, Suggestor,
 };
 use ferrox_highs_sys::HighsModelStatus;
 use ferrox_highs_sys::safe::{HighsError, HighsSolver};
@@ -37,8 +37,8 @@ impl Suggestor for HighsMipSuggestor {
             .any(|f| f.id().starts_with(REQUEST_PREFIX) && !plan_exists(ctx, request_id(f.id())))
     }
 
-    fn provenance(&self) -> &'static str {
-        FERROX_PROVENANCE.as_str()
+    fn provenance(&self) -> Provenance {
+        Provenance::from(FERROX_PROVENANCE.as_str())
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use converge_model::formation::{FormationPlan, FormationRequest, ProfileSnapshot, RoleAssignment};
 use converge_pack::{
-    AgentEffect, Context, ContextKey, ExecutionIdentity, ExecutionIdentityEvidence,
+    AgentEffect, Context, ContextKey, ExecutionIdentity, ExecutionIdentityEvidence, Provenance,
     ProvenanceSource, Suggestor,
 };
 use ferrox_ortools_sys::safe::CpModel;
@@ -55,8 +55,8 @@ impl Suggestor for CpSatFormationSuggestor {
             .any(|f| f.id().starts_with(REQUEST_PREFIX) && !plan_exists(ctx, request_id(f.id())))
     }
 
-    fn provenance(&self) -> &'static str {
-        FERROX_PROVENANCE.as_str()
+    fn provenance(&self) -> Provenance {
+        Provenance::from(FERROX_PROVENANCE.as_str())
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {

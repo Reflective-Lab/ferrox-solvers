@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use converge_pack::{
-    AgentEffect, Context, ContextKey, ExecutionIdentity, ProvenanceSource, Suggestor,
+    AgentEffect, Context, ContextKey, ExecutionIdentity, Provenance, ProvenanceSource, Suggestor,
 };
 use ferrox_ortools_sys::OrtoolsStatus;
 use ferrox_ortools_sys::safe::{LinearSolver, OrtoolsError};
@@ -37,8 +37,8 @@ impl Suggestor for GlopLpSuggestor {
             .any(|f| f.id().starts_with(REQUEST_PREFIX) && !plan_exists(ctx, request_id(f.id())))
     }
 
-    fn provenance(&self) -> &'static str {
-        FERROX_PROVENANCE.as_str()
+    fn provenance(&self) -> Provenance {
+        Provenance::from(FERROX_PROVENANCE.as_str())
     }
 
     async fn execute(&self, ctx: &dyn Context) -> AgentEffect {

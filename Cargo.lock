@@ -150,8 +150,6 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 [[package]]
 name = "converge-core"
 version = "3.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "090b97037362a6e0dd96970de379483e8b770b519be8bb3aa25905f487fa8e3a"
 dependencies = [
  "async-trait",
  "converge-pack",
@@ -219,8 +217,6 @@ dependencies = [
 [[package]]
 name = "converge-model"
 version = "3.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b63b3e65902cb2a1b8c4e6928ec2937959b6f7a11d09e5f0f03ec1b261b538a"
 dependencies = [
  "converge-core",
  "converge-pack",
@@ -231,13 +227,12 @@ dependencies = [
 [[package]]
 name = "converge-pack"
 version = "3.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "497b800b3e4d9e744fabdc2663b28b3af6c87f0fb23d0045f18333bdcc233444"
 dependencies = [
  "async-trait",
  "hex",
  "serde",
  "serde_json",
+ "sha2",
  "strum",
  "thiserror",
 ]
@@ -245,8 +240,6 @@ dependencies = [
 [[package]]
 name = "converge-provider"
 version = "3.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "721f145273c0d7f41788632cf0081214c4f2b820dd63480ca61b0e3d8d105023"
 dependencies = [
  "serde",
  "serde_json",
@@ -1788,3 +1781,51 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[patch.unused]]
+name = "converge-experience"
+version = "3.9.1"
+
+[[patch.unused]]
+name = "converge-kernel"
+version = "3.9.1"
+
+[[patch.unused]]
+name = "converge-optimization"
+version = "3.9.1"
+
+[[patch.unused]]
+name = "converge-runtime"
+version = "3.9.1"
+
+[[patch.unused]]
+name = "organism-adversarial"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-dynamics"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-intent"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-learning"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-pack"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-planning"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-runtime"
+version = "1.9.1"
+
+[[patch.unused]]
+name = "organism-simulation"
+version = "1.9.1"
