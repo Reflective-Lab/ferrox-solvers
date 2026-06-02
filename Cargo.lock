@@ -149,7 +149,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "converge-core"
-version = "3.9.1"
+version = "3.9.2"
 dependencies = [
  "async-trait",
  "converge-pack",
@@ -166,21 +166,21 @@ dependencies = [
 
 [[package]]
 name = "converge-ferrox-highs-sys"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "converge-ferrox-ortools-sys"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "converge-ferrox-server"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "converge-ferrox-highs-sys",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "converge-ferrox-solver"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "async-trait",
  "converge-core",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "converge-model"
-version = "3.9.1"
+version = "3.9.2"
 dependencies = [
  "converge-core",
  "converge-pack",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "converge-pack"
-version = "3.9.1"
+version = "3.9.2"
 dependencies = [
  "async-trait",
  "hex",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "converge-provider"
-version = "3.9.1"
+version = "3.9.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1784,48 +1784,48 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[patch.unused]]
 name = "converge-experience"
-version = "3.9.1"
+version = "3.9.2"
 
 [[patch.unused]]
 name = "converge-kernel"
-version = "3.9.1"
+version = "3.9.2"
 
 [[patch.unused]]
 name = "converge-optimization"
-version = "3.9.1"
+version = "3.9.2"
 
 [[patch.unused]]
 name = "converge-runtime"
-version = "3.9.1"
+version = "3.9.2"
 
 [[patch.unused]]
 name = "organism-adversarial"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-dynamics"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-intent"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-learning"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-pack"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-planning"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-runtime"
-version = "1.9.1"
+version = "1.9.2"
 
 [[patch.unused]]
 name = "organism-simulation"
-version = "1.9.1"
+version = "1.9.2"
