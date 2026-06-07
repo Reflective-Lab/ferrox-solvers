@@ -49,8 +49,9 @@ WORKDIR /workspace
 # Build context is the ferrox repo root.
 COPY . /workspace/
 
-# Strip path = "../converge/..." so cargo resolves converge crates from crates.io.
-RUN sed -i -E 's|path = "\.\./converge/[^"]*",[[:space:]]*||g' /workspace/Cargo.toml && \
+# Docker builds only receive the ferrox repo as context, so local Reflective
+# path patches cannot resolve. Use the published workspace dependency versions.
+RUN sed -i '/^\[patch\.crates-io\]/,$d' /workspace/Cargo.toml && \
     rm -f /workspace/Cargo.lock
 
 ENV FERROX_ORTOOLS_ROOT=/opt/ortools/build
