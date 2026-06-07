@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.94.0"
+  RUST_VERSION: "1.96.0"
   # ferrox-server requires compiled C++ solver libs — excluded from CI.
   # Solver integration is validated locally with `just example-*`.
   EXCLUDES: --exclude converge-ferrox-server
