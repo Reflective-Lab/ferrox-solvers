@@ -11,6 +11,10 @@ Knowledge base for the `ferrox` Converge extension.
 
 **Meta:** [[INDEX]] — entity catalog | [[LOG]] — mutation log
 
+## Positioning
+
+- [[Positioning]] — elevator pitch, LLM synergy, OR-Tools and HiGHS strengths
+
 ## Architecture
 
 - [[Architecture/Capability Map]] — upstream solver capabilities vs Ferrox wrapper posture
