@@ -127,11 +127,14 @@ fn git_head(source_dir: &std::path::Path) -> Option<String> {
     (!commit.is_empty()).then(|| commit.to_string())
 }
 
-// Only the macOS branch consumes `lib_dir` (to walk `libortools.dylib`
-// transitive deps via `otool -L`). On Linux/Windows the parameter is
-// unused, so silence the lint on those targets specifically rather than
-// blanket-allowing on macOS where it would mask a real bug.
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+// Both macOS and Linux branches consume `lib_dir` to walk libortools'
+// transitive deps. macOS uses `otool -L` on libortools.dylib; Linux uses
+// `readelf -d` on libortools.so to read DT_NEEDED entries. Windows is
+// currently unhandled (would need dumpbin.exe).
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "linux")),
+    allow(unused_variables)
+)]
 fn link_ortools_dylib_dependencies(lib_dir: &std::path::Path) {
     #[cfg(target_os = "macos")]
     {
@@ -171,6 +174,62 @@ fn link_ortools_dylib_dependencies(lib_dir: &std::path::Path) {
                 continue;
             };
             if matches!(lib_name, "ortools" | "c++" | "System") || !linked.insert(lib_name) {
+                continue;
+            }
+            println!("cargo:rustc-link-lib=dylib={lib_name}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+
+        let libortools = lib_dir.join("libortools.so");
+        let Ok(output) = Command::new("readelf")
+            .arg("-d")
+            .arg(&libortools)
+            .output()
+        else {
+            return;
+        };
+        if !output.status.success() {
+            return;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut linked = std::collections::BTreeSet::new();
+        for line in stdout.lines() {
+            // readelf -d emits lines like:
+            //   0x0000000000000001 (NEEDED)  Shared library: [libabsl_log_internal_message.so.2508.0.0]
+            let Some(idx) = line.find("Shared library: [") else {
+                continue;
+            };
+            let after = &line[idx + "Shared library: [".len()..];
+            let Some(file_name) = after.strip_suffix(']') else {
+                continue;
+            };
+            // libabsl_log_internal_message.so.2508.0.0 → absl_log_internal_message
+            let Some(lib_name) = file_name
+                .strip_prefix("lib")
+                .and_then(|s| s.split(".so").next())
+            else {
+                continue;
+            };
+            // Skip self + libs rustc/gcc handle by default.
+            if matches!(
+                lib_name,
+                "ortools"
+                    | "stdc++"
+                    | "gcc_s"
+                    | "c"
+                    | "m"
+                    | "pthread"
+                    | "dl"
+                    | "rt"
+                    | "util"
+                    | "ld-linux-x86-64"
+            ) || !linked.insert(lib_name.to_string())
+            {
                 continue;
             }
             println!("cargo:rustc-link-lib=dylib={lib_name}");
