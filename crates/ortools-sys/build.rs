@@ -63,10 +63,22 @@ fn build_with_ortools() {
 
     // v9.15 exposes Abseil/Protobuf symbols through wrapper object code, so
     // link the shared dependencies declared by libortools as direct inputs.
-    println!("cargo:rustc-link-lib=dylib=ortools");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out_dir.display());
-    link_ortools_dylib_dependencies(&lib_dir);
+    //
+    // Linking mode: prefer the static archive (libortools.a) if present —
+    // that's what containerized deploys build (BUILD_SHARED_LIBS=OFF), since
+    // the shared-lib chain has init-ordering problems in some sandboxed
+    // runtimes (std::bad_alloc at static init under Cloud Run, 2026-06-13).
+    // Fall back to dylib for macOS dev where Karl's local Makefile builds
+    // shared.
+    let prefer_static = lib_dir.join("libortools.a").exists();
+    if prefer_static {
+        println!("cargo:rustc-link-lib=static=ortools");
+    } else {
+        println!("cargo:rustc-link-lib=dylib=ortools");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out_dir.display());
+        link_ortools_dylib_dependencies(&lib_dir);
+    }
 
     #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-lib=c++");
