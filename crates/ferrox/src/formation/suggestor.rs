@@ -85,12 +85,12 @@ impl Suggestor for CpSatFormationSuggestor {
                     );
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(ContextKey::Strategies, plan_id, plan)
+                            .proposed_fact_for(fact, ContextKey::Strategies, plan_id, plan)
                             .with_confidence(confidence),
                     );
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(ContextKey::Evaluations, identity_id, identity)
+                            .proposed_fact_for(fact, ContextKey::Evaluations, identity_id, identity)
                             .with_confidence(1.0),
                     );
                 }

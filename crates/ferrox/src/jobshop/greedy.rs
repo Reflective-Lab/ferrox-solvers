@@ -70,7 +70,8 @@ impl Suggestor for GreedyJobShopSuggestor {
                     let confidence = 0.55_f64;
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(
+                            .proposed_fact_for(
+                                fact,
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
                                 plan,

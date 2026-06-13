@@ -83,7 +83,8 @@ impl Suggestor for CpSatJobShopSuggestor {
                     };
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(
+                            .proposed_fact_for(
+                                fact,
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
                                 plan,

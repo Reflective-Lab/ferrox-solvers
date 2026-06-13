@@ -71,7 +71,8 @@ impl Suggestor for GreedySchedulerSuggestor {
                     let confidence = (plan.throughput_ratio() * 0.65).min(0.65);
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(
+                            .proposed_fact_for(
+                                fact,
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
                                 plan,

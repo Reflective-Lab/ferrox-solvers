@@ -64,7 +64,8 @@ impl Suggestor for NearestNeighborSuggestor {
                     let confidence = (plan.visit_ratio() * 0.60).min(0.60);
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(
+                            .proposed_fact_for(
+                                fact,
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{rid}"),
                                 plan,

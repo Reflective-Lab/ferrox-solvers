@@ -61,7 +61,8 @@ impl Suggestor for MinCostFlowSuggestor {
                     let confidence = confidence(&plan);
                     proposals.push(
                         FERROX_PROVENANCE
-                            .proposed_fact(
+                            .proposed_fact_for(
+                                fact,
                                 ContextKey::Strategies,
                                 format!("{PLAN_PREFIX}{}", plan.request_id),
                                 plan,
