@@ -1,6 +1,9 @@
 mod convert;
 mod service;
-mod tenants;
+// Re-import from the library target so integration tests share the same module path.
+// Unused for now; wired in by M1.A3 when the tenant interceptor lands.
+#[allow(unused_imports)]
+use converge_ferrox_server::tenants;
 
 pub mod proto {
     pub mod ferrox {

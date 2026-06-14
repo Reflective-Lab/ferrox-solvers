@@ -8,6 +8,10 @@ repository.workspace = true
 publish       = false
 description   = "gRPC server exposing ferrox solvers (CP-SAT, GLOP, HiGHS)"
 
+[lib]
+name = "converge_ferrox_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ferrox-server"
 path = "src/main.rs"
