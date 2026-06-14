@@ -65,7 +65,14 @@ impl TenantRegistry {
             .ok_or_else(|| Status::permission_denied(format!("unknown tenant: {slug}")))?
             .clone();
         sem.try_acquire_owned()
-            .map_err(|_| Status::resource_exhausted(format!("tenant {slug} at in-flight cap")))
+            .map_err(|e| match e {
+                tokio::sync::TryAcquireError::NoPermits => {
+                    Status::resource_exhausted(format!("tenant {slug} at in-flight cap"))
+                }
+                tokio::sync::TryAcquireError::Closed => {
+                    Status::unavailable(format!("tenant {slug} semaphore closed"))
+                }
+            })
     }
 }
 
