@@ -13,6 +13,7 @@ Major entities in the `ferrox` knowledge base.
 
 - [Capability Map](Architecture/Capability%20Map.md) — upstream solver capabilities vs Ferrox wrapper posture
 - [Surface](Architecture/Surface.md) — public crate surface and contract shape
+- [Cloud Run Deployment](Architecture/Cloud%20Run%20Deployment.md) — ferrox-server as template for the gRPC suggestor pattern (M1 of the spec)
 
 ## Building
 
