@@ -197,11 +197,7 @@ fn link_ortools_dylib_dependencies(lib_dir: &std::path::Path) {
         use std::process::Command;
 
         let libortools = lib_dir.join("libortools.so");
-        let Ok(output) = Command::new("readelf")
-            .arg("-d")
-            .arg(&libortools)
-            .output()
-        else {
+        let Ok(output) = Command::new("readelf").arg("-d").arg(&libortools).output() else {
             return;
         };
         if !output.status.success() {
