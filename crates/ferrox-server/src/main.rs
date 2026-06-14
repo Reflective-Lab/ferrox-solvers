@@ -1,5 +1,6 @@
 mod convert;
 mod service;
+mod tenants;
 
 pub mod proto {
     pub mod ferrox {
