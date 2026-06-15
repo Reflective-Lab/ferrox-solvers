@@ -1,15 +1,45 @@
 #!/usr/bin/env bash
 # Smoke-test the deployed ferrox-server.
 #
-# Usage:  ops/smoke.sh https://ferrox-server-XXXXXXXX-ew.a.run.app
+# ─── Canonical flow: Cloud Shell ──────────────────────────────────────────────
+# The ferrox-server Cloud Run service is `ingress=internal`, so callers must
+# reach it from inside the VPC. The most reliable + zero-setup path is Cloud
+# Shell in the browser. It runs in Google's network, ships grpcurl, and uses
+# your authenticated identity by default.
 #
-# Run from Cloud Shell (has VPC access by default) or via:
+#   1. Open https://shell.cloud.google.com  (your project = reflective-labs)
+#   2. git clone --depth=1 -b next https://github.com/Reflective-Lab/ferrox-solvers.git
+#   3. cd ferrox-solvers
+#   4. ops/smoke.sh https://ferrox-server-640630843925.europe-west1.run.app
+#
+# The server registers grpc.reflection.v1.ServerReflection, so no -proto
+# flag is needed — grpcurl introspects the schema over the wire.
+#
+# ─── Alternative: local dev with cloud-run-proxy ──────────────────────────────
+# Requires the cloud-run-proxy binary on PATH (Homebrew gcloud ships it under
+# /opt/homebrew/share/google-cloud-sdk/bin/ but its h2c local listener has
+# been observed to hang on some macOS versions). If you have a working proxy:
+#
 #   gcloud run services proxy ferrox-server --project=reflective-labs \
 #       --region=europe-west1 --port=9090 &
 #   ops/smoke.sh http://localhost:9090
 #
-# Requires grpcurl. Install: gcloud components install grpcurl   (Cloud Shell)
-#                    OR     brew install grpcurl                 (macOS local)
+# If the proxy hangs, fall back to Cloud Shell above, or temporarily flip
+# `--ingress=all` (auth still required via ID token) for a 3-minute window:
+#
+#   gcloud run services update ferrox-server --project=reflective-labs \
+#       --region=europe-west1 --ingress=all
+#   TOKEN=$(gcloud auth print-identity-token)
+#   grpcurl -H "authorization: Bearer ${TOKEN}" \
+#       ferrox-server-640630843925.europe-west1.run.app:443 list
+#   # ...smoke...
+#   gcloud run services update ferrox-server --project=reflective-labs \
+#       --region=europe-west1 --ingress=internal
+#
+# ─── grpcurl install ──────────────────────────────────────────────────────────
+# Cloud Shell: pre-installed.
+# macOS:      brew install grpcurl
+# Linux:      see https://github.com/fullstorydev/grpcurl/releases
 set -euo pipefail
 
 URL="${1:?usage: smoke.sh <ferrox-server-url>}"
