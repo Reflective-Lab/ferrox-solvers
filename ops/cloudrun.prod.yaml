@@ -1,0 +1,60 @@
+# Cloud Run service manifest — ferrox-server, prod, reflective-labs.
+#
+# Apply with:
+#   gcloud run services replace ops/cloudrun.prod.yaml \
+#       --project=reflective-labs --region=europe-west1
+#
+# IMPORTANT: when re-deploying with a new image tag, update
+# spec.template.spec.containers[0].image to the exact tag pushed by
+# `just deploy-build` (or gcloud builds submit) BEFORE applying.
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ferrox-server
+  labels:
+    app: ferrox-server
+    extension: ferrox
+    platform: converge
+  annotations:
+    # Internal-only ingress per spec §7.1.
+    run.googleapis.com/ingress: internal
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        # VPC connector for ingress=internal callers to reach us.
+        run.googleapis.com/vpc-access-connector: solver-egress-ew1
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+    spec:
+      serviceAccountName: ferrox-server@reflective-labs.iam.gserviceaccount.com
+      # CP-SAT solves are CPU-bound and one solve fully uses an instance.
+      # Cloud Run scales horizontally to handle bursts.
+      containerConcurrency: 1
+      # Cloud Run hard ceiling for unary HTTP/2 — clamp our timeout below.
+      timeoutSeconds: 300
+      containers:
+        - image: europe-west1-docker.pkg.dev/reflective-labs/converge/ferrox-server:v0.7.2-d5c2af7
+          ports:
+            # name: h2c — tells Cloud Run to use HTTP/2 cleartext to the
+            # container. Cloud Run still terminates client-facing TLS.
+            - name: h2c
+              containerPort: 50051
+          resources:
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          env:
+            - name: FERROX_ADDR
+              value: "0.0.0.0:50051"
+            - name: FERROX_SERVER_MAX_BLOCKING_SOLVES
+              value: "1"
+            - name: RUST_LOG
+              value: "ferrox_server=info"
+            # No FERROX_AUTH_TOKEN in v1 — tenant header is the only gate
+            # (spec §7.2). Set this only when the bearer-auth upgrade is wanted.
+  traffic:
+    - latestRevision: true
+      percent: 100
