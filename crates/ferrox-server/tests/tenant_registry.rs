@@ -159,3 +159,41 @@ fn interceptor_accepts_good_bearer_when_env_set() {
         assert!(result.is_ok(), "good bearer accepted");
     });
 }
+
+// ─── RequestId mint / pass-through ──────────────────────────────────────
+
+use converge_ferrox_server::interceptor::RequestId;
+use uuid::Uuid;
+
+#[test]
+#[serial(env)]
+fn interceptor_mints_request_id_when_header_absent() {
+    temp_env::with_var_unset(AUTH_ENV, || {
+        let req = req_with_tenant("quorum-sense");
+        let req = request_interceptor(req).expect("known tenant accepted");
+        let id = req
+            .extensions()
+            .get::<RequestId>()
+            .map(|r| r.0.clone())
+            .expect("interceptor attaches request id");
+        assert!(!id.is_empty(), "minted id must be non-empty");
+        Uuid::parse_str(&id).expect("minted id must be a valid UUID");
+    });
+}
+
+#[test]
+#[serial(env)]
+fn interceptor_accepts_client_supplied_request_id() {
+    temp_env::with_var_unset(AUTH_ENV, || {
+        let mut req = req_with_tenant("quorum-sense");
+        let value: MetadataValue<_> = "client-supplied-id-12345".parse().expect("ascii");
+        req.metadata_mut().insert("x-request-id", value);
+        let req = request_interceptor(req).expect("known tenant accepted");
+        let id = req
+            .extensions()
+            .get::<RequestId>()
+            .map(|r| r.0.clone())
+            .expect("interceptor attaches request id");
+        assert_eq!(id, "client-supplied-id-12345");
+    });
+}
