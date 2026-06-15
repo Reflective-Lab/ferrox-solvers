@@ -269,3 +269,29 @@ release-check:
     SOAK_DURATION_MIN=5 just soak
     just lint
     cargo test --workspace
+
+# ─── Cloud Run prod deploy (M1) ──────────────────────────────────────────────
+
+# Build + push prod image. _TAG defaults to v0.7.2-<git short sha>.
+# Usage: just deploy-build  or  just deploy-build TAG=v0.7.2-abc1234
+deploy-build TAG=`echo "v0.7.2-$(git rev-parse --short HEAD)"`:
+    gcloud builds submit . \
+        --project=reflective-labs \
+        --config=ops/cloudbuild.prod.yaml \
+        --substitutions=_TAG={{TAG}}
+
+# Apply Cloud Run manifest. Edit ops/cloudrun.prod.yaml image tag first.
+deploy-apply:
+    gcloud run services replace ops/cloudrun.prod.yaml \
+        --project=reflective-labs \
+        --region=europe-west1
+
+# List tenants the server image currently knows about.
+tenants-show:
+    @grep -E '^\s*Tenant \{ slug' crates/ferrox-server/src/tenants.rs
+
+# Smoke against the deployed service. Requires the Cloud Run service URL.
+# Run from Cloud Shell or via `gcloud run services proxy` since ingress=internal.
+# Usage: just smoke-prod URL=https://ferrox-server-XXX-ew.a.run.app
+smoke-prod URL:
+    ops/smoke.sh {{URL}}
