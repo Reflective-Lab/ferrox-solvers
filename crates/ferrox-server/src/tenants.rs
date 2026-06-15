@@ -24,6 +24,14 @@ pub const TENANTS: &[Tenant] = &[
     Tenant { slug: "quorum-sense", max_in_flight: 4 },
 ];
 
+impl Tenant {
+    /// Return the in-flight cap for `slug`, or `None` if not on the allowlist.
+    #[must_use]
+    pub fn cap_for(slug: &str) -> Option<u32> {
+        TENANTS.iter().find(|t| t.slug == slug).map(|t| t.max_in_flight)
+    }
+}
+
 /// Request-extension marker carrying the validated tenant slug into the
 /// service layer. Attached by `request_interceptor` after the allowlist
 /// check passes.

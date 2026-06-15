@@ -1,6 +1,6 @@
 //! Integration tests for the tenant allowlist + per-tenant semaphore.
 
-use converge_ferrox_server::tenants::{Tenant, TenantRegistry, TENANTS};
+use converge_ferrox_server::tenants::{Tenant, TenantRegistry};
 use tonic::Code;
 
 #[test]
@@ -33,7 +33,7 @@ async fn acquire_known_tenant_below_cap_succeeds() {
 #[tokio::test]
 async fn acquire_over_cap_returns_resource_exhausted() {
     let reg = TenantRegistry::default();
-    let cap = Tenant::lookup_const_cap("quorum-sense");
+    let cap = Tenant::cap_for("quorum-sense").expect("seeded") as usize;
     let mut held = Vec::with_capacity(cap);
     for _ in 0..cap {
         held.push(reg.acquire("quorum-sense").await.expect("under cap"));
@@ -41,19 +41,4 @@ async fn acquire_over_cap_returns_resource_exhausted() {
     let err = reg.acquire("quorum-sense").await.expect_err("over cap");
     assert_eq!(err.code(), Code::ResourceExhausted);
     assert!(err.message().contains("at in-flight cap"));
-}
-
-// Helper trait so the test can read the const cap without exporting more.
-trait LookupConstCap {
-    fn lookup_const_cap(slug: &str) -> usize;
-}
-
-impl LookupConstCap for Tenant {
-    fn lookup_const_cap(slug: &str) -> usize {
-        TENANTS
-            .iter()
-            .find(|t| t.slug == slug)
-            .map(|t| t.max_in_flight as usize)
-            .expect("seeded tenant")
-    }
 }

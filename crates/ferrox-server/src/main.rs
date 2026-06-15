@@ -1,9 +1,5 @@
 mod convert;
 mod service;
-// Re-import from the library target so integration tests share the same module path.
-// Unused for now; wired in by M1.A3 when the tenant interceptor lands.
-#[allow(unused_imports)]
-use converge_ferrox_server::tenants;
 
 pub mod proto {
     pub mod ferrox {
@@ -22,28 +18,10 @@ pub mod proto {
 use std::net::SocketAddr;
 
 use tonic::transport::{Identity, Server, ServerTlsConfig};
-use tonic::{Request, Status};
 
+use converge_ferrox_server::interceptor::request_interceptor;
 use proto::ferrox::v1::ferrox_solver_server::FerroxSolverServer;
 use service::FerroxSolverService;
-
-#[allow(clippy::result_large_err)]
-fn auth_interceptor(req: Request<()>) -> Result<Request<()>, Status> {
-    let expected = std::env::var("FERROX_AUTH_TOKEN").ok();
-    let Some(token) = expected else {
-        return Ok(req); // auth disabled when env var is absent
-    };
-    let provided = req
-        .metadata()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if provided == format!("Bearer {token}") {
-        Ok(req)
-    } else {
-        Err(Status::unauthenticated("invalid or missing token"))
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -81,13 +59,13 @@ async fn main() -> anyhow::Result<()> {
 
         Server::builder()
             .tls_config(tls)?
-            .add_service(FerroxSolverServer::with_interceptor(svc, auth_interceptor))
+            .add_service(FerroxSolverServer::with_interceptor(svc, request_interceptor))
             .serve(addr)
             .await?;
     } else {
         tracing::warn!("TLS cert/key not found — starting without TLS (dev/test only)");
         Server::builder()
-            .add_service(FerroxSolverServer::with_interceptor(svc, auth_interceptor))
+            .add_service(FerroxSolverServer::with_interceptor(svc, request_interceptor))
             .serve(addr)
             .await?;
     }
