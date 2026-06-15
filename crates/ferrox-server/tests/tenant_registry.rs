@@ -26,7 +26,10 @@ fn unknown_tenant_returns_none_from_lookup() {
 #[tokio::test]
 async fn acquire_unknown_tenant_returns_permission_denied() {
     let reg = TenantRegistry::default();
-    let err = reg.acquire("nope-not-real").await.expect_err("should error");
+    let err = reg
+        .acquire("nope-not-real")
+        .await
+        .expect_err("should error");
     assert_eq!(err.code(), Code::PermissionDenied);
     assert!(err.message().contains("unknown tenant"));
 }

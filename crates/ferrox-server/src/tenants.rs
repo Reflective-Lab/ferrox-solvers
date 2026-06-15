@@ -20,15 +20,19 @@ pub struct Tenant {
     pub max_in_flight: u32,
 }
 
-pub const TENANTS: &[Tenant] = &[
-    Tenant { slug: "quorum-sense", max_in_flight: 4 },
-];
+pub const TENANTS: &[Tenant] = &[Tenant {
+    slug: "quorum-sense",
+    max_in_flight: 4,
+}];
 
 impl Tenant {
     /// Return the in-flight cap for `slug`, or `None` if not on the allowlist.
     #[must_use]
     pub fn cap_for(slug: &str) -> Option<u32> {
-        TENANTS.iter().find(|t| t.slug == slug).map(|t| t.max_in_flight)
+        TENANTS
+            .iter()
+            .find(|t| t.slug == slug)
+            .map(|t| t.max_in_flight)
     }
 }
 
@@ -76,15 +80,14 @@ impl TenantRegistry {
             .get(slug)
             .ok_or_else(|| Status::permission_denied(format!("unknown tenant: {slug}")))?
             .clone();
-        sem.try_acquire_owned()
-            .map_err(|e| match e {
-                tokio::sync::TryAcquireError::NoPermits => {
-                    Status::resource_exhausted(format!("tenant {slug} at in-flight cap"))
-                }
-                tokio::sync::TryAcquireError::Closed => {
-                    Status::unavailable(format!("tenant {slug} semaphore closed"))
-                }
-            })
+        sem.try_acquire_owned().map_err(|e| match e {
+            tokio::sync::TryAcquireError::NoPermits => {
+                Status::resource_exhausted(format!("tenant {slug} at in-flight cap"))
+            }
+            tokio::sync::TryAcquireError::Closed => {
+                Status::unavailable(format!("tenant {slug} semaphore closed"))
+            }
+        })
     }
 }
 

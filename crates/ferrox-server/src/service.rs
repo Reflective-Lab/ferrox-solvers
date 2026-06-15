@@ -66,7 +66,10 @@ impl FerroxSolverService {
 
 impl Default for FerroxSolverService {
     fn default() -> Self {
-        Self::new(configured_blocking_solves(), Arc::new(TenantRegistry::default()))
+        Self::new(
+            configured_blocking_solves(),
+            Arc::new(TenantRegistry::default()),
+        )
     }
 }
 

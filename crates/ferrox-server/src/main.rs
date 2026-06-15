@@ -27,8 +27,7 @@ use service::FerroxSolverService;
 /// `tonic_prost_build::configure().file_descriptor_set_path(...)`. Consumed
 /// by `tonic-reflection` to advertise the service schema over the standard
 /// `grpc.reflection.v1.ServerReflection` API.
-const FERROX_FILE_DESCRIPTOR_SET: &[u8] =
-    tonic::include_file_descriptor_set!("ferrox_descriptor");
+const FERROX_FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("ferrox_descriptor");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -87,7 +86,10 @@ async fn main() -> anyhow::Result<()> {
             .tls_config(tls)?
             .add_service(health_service)
             .add_service(reflection_service)
-            .add_service(FerroxSolverServer::with_interceptor(svc, request_interceptor))
+            .add_service(FerroxSolverServer::with_interceptor(
+                svc,
+                request_interceptor,
+            ))
             .serve(addr)
             .await?;
     } else {
@@ -95,7 +97,10 @@ async fn main() -> anyhow::Result<()> {
         Server::builder()
             .add_service(health_service)
             .add_service(reflection_service)
-            .add_service(FerroxSolverServer::with_interceptor(svc, request_interceptor))
+            .add_service(FerroxSolverServer::with_interceptor(
+                svc,
+                request_interceptor,
+            ))
             .serve(addr)
             .await?;
     }
