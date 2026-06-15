@@ -12,9 +12,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Emit the encoded FileDescriptorSet so tonic-reflection can serve
+    // grpc.reflection.v1.ServerReflection. The path is read at compile time
+    // via `tonic::include_file_descriptor_set!("ferrox_descriptor")` in main.rs.
+    let descriptor_path = std::path::PathBuf::from(std::env::var("OUT_DIR")?)
+        .join("ferrox_descriptor.bin");
+
     tonic_prost_build::configure()
         .build_server(true)
         .build_client(false)
+        .file_descriptor_set_path(&descriptor_path)
         .compile_protos(&[proto], &[proto_dir])?;
 
     Ok(())
