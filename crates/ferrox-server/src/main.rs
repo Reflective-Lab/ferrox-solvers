@@ -38,6 +38,13 @@ async fn main() -> anyhow::Result<()> {
 
     let svc = FerroxSolverService::default();
 
+    // Health checking — standard grpc.health.v1.Health, exposed without
+    // tenant gating so Cloud Run probes and grpcurl can hit it freely.
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<FerroxSolverServer<FerroxSolverService>>()
+        .await;
+
     let cert_path = std::env::var("FERROX_TLS_CERT").unwrap_or_else(|_| "/tls/server.crt".into());
     let key_path = std::env::var("FERROX_TLS_KEY").unwrap_or_else(|_| "/tls/server.key".into());
 
@@ -59,12 +66,14 @@ async fn main() -> anyhow::Result<()> {
 
         Server::builder()
             .tls_config(tls)?
+            .add_service(health_service)
             .add_service(FerroxSolverServer::with_interceptor(svc, request_interceptor))
             .serve(addr)
             .await?;
     } else {
         tracing::warn!("TLS cert/key not found — starting without TLS (dev/test only)");
         Server::builder()
+            .add_service(health_service)
             .add_service(FerroxSolverServer::with_interceptor(svc, request_interceptor))
             .serve(addr)
             .await?;
