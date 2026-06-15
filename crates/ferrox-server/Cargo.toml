@@ -37,5 +37,9 @@ anyhow               = "1"
 [build-dependencies]
 tonic-prost-build = "0.14"
 
+[dev-dependencies]
+serial_test = "3"
+temp-env    = "0.3"
+
 [lints]
 workspace = true
