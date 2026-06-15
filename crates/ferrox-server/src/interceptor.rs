@@ -1,14 +1,17 @@
 //! Tonic interceptor: validate `Authorization` (optional bearer) and
-//! `x-converge-app` (tenant), attaching the validated `TenantSlug` to the
-//! request extensions so the service layer can acquire a per-tenant permit
-//! without re-parsing metadata.
+//! `x-converge-app` (tenant); mint/accept `x-request-id`; attach both to
+//! request extensions so the service layer can use them in spans.
 //!
 //! Per spec §6 and §7.2 — bearer is optional (gated by `FERROX_AUTH_TOKEN`
 //! env presence); tenant header is required.
 
 use tonic::{Request, Status};
+use uuid::Uuid;
 
 use crate::tenants::{TenantRegistry, TenantSlug};
+
+#[derive(Clone, Debug)]
+pub struct RequestId(pub String);
 
 #[allow(clippy::result_large_err)]
 pub fn request_interceptor(mut req: Request<()>) -> Result<Request<()>, Status> {
@@ -34,6 +37,15 @@ pub fn request_interceptor(mut req: Request<()>) -> Result<Request<()>, Status> 
     let tenant = TenantRegistry::lookup(slug)
         .ok_or_else(|| Status::permission_denied(format!("unknown tenant: {slug}")))?;
 
+    // ─ Request ID (mint if absent) ─────────────────────────────────────────
+    let request_id = req
+        .metadata()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
     req.extensions_mut().insert(TenantSlug(tenant.slug));
+    req.extensions_mut().insert(RequestId(request_id));
     Ok(req)
 }

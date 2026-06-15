@@ -16,6 +16,7 @@ use crate::proto::ferrox::v1::{
     SolveCpRequest, SolveCpResponse, SolveLpRequest, SolveLpResponse, SolveMipRequest,
     SolveMipResponse,
 };
+use converge_ferrox_server::interceptor::RequestId;
 use converge_ferrox_server::tenants::{TenantRegistry, TenantSlug};
 
 #[derive(Clone)]
@@ -86,13 +87,23 @@ fn configured_blocking_solves() -> usize {
     }
 }
 
-fn tenant_slug_from<R>(req: &Request<R>) -> Result<&'static str, Status> {
-    req.extensions()
+struct RequestContext<'a> {
+    tenant: &'static str,
+    request_id: &'a str,
+}
+
+fn request_context<R>(req: &Request<R>) -> Result<RequestContext<'_>, Status> {
+    let tenant = req
+        .extensions()
         .get::<TenantSlug>()
         .map(|t| t.0)
-        .ok_or_else(|| {
-            Status::internal("request reached service without TenantSlug extension")
-        })
+        .ok_or_else(|| Status::internal("missing TenantSlug extension"))?;
+    let request_id = req
+        .extensions()
+        .get::<RequestId>()
+        .map(|r| r.0.as_str())
+        .ok_or_else(|| Status::internal("missing RequestId extension"))?;
+    Ok(RequestContext { tenant, request_id })
 }
 
 #[tonic::async_trait]
@@ -101,11 +112,23 @@ impl FerroxSolver for FerroxSolverService {
         &self,
         request: Request<SolveCpRequest>,
     ) -> Result<Response<SolveCpResponse>, Status> {
-        let tenant = tenant_slug_from(&request)?;
+        let ctx = request_context(&request)?;
+        let span = tracing::info_span!(
+            "solve_cp",
+            tenant_app = %ctx.tenant,
+            request_id = %ctx.request_id,
+            rpc_method = "ferrox.v1.FerroxSolver/SolveCp",
+        );
+        let _enter = span.enter();
+        let started = std::time::Instant::now();
+        let tenant = ctx.tenant;
+        drop(_enter); // drop guard before await
         let req = cp_req_from_proto(request.into_inner())?;
         let plan = self
             .run_blocking("solve_cp", tenant, move || solve_cp(&req))
             .await?;
+        let elapsed_us = started.elapsed().as_micros();
+        tracing::info!(solve_duration_us = elapsed_us, status = "ok", "solve_cp completed");
         Ok(Response::new(cp_resp_to_proto(plan)))
     }
 
@@ -113,11 +136,23 @@ impl FerroxSolver for FerroxSolverService {
         &self,
         request: Request<SolveLpRequest>,
     ) -> Result<Response<SolveLpResponse>, Status> {
-        let tenant = tenant_slug_from(&request)?;
+        let ctx = request_context(&request)?;
+        let span = tracing::info_span!(
+            "solve_lp",
+            tenant_app = %ctx.tenant,
+            request_id = %ctx.request_id,
+            rpc_method = "ferrox.v1.FerroxSolver/SolveLp",
+        );
+        let _enter = span.enter();
+        let started = std::time::Instant::now();
+        let tenant = ctx.tenant;
+        drop(_enter);
         let req = lp_req_from_proto(request.into_inner())?;
         let plan = self
             .run_blocking("solve_lp", tenant, move || solve_lp(&req))
             .await?;
+        let elapsed_us = started.elapsed().as_micros();
+        tracing::info!(solve_duration_us = elapsed_us, status = "ok", "solve_lp completed");
         Ok(Response::new(lp_resp_to_proto(plan)))
     }
 
@@ -125,11 +160,23 @@ impl FerroxSolver for FerroxSolverService {
         &self,
         request: Request<SolveMipRequest>,
     ) -> Result<Response<SolveMipResponse>, Status> {
-        let tenant = tenant_slug_from(&request)?;
+        let ctx = request_context(&request)?;
+        let span = tracing::info_span!(
+            "solve_mip",
+            tenant_app = %ctx.tenant,
+            request_id = %ctx.request_id,
+            rpc_method = "ferrox.v1.FerroxSolver/SolveMip",
+        );
+        let _enter = span.enter();
+        let started = std::time::Instant::now();
+        let tenant = ctx.tenant;
+        drop(_enter);
         let req = mip_req_from_proto(request.into_inner())?;
         let plan = self
             .run_blocking("solve_mip", tenant, move || solve_mip(&req))
             .await?;
+        let elapsed_us = started.elapsed().as_micros();
+        tracing::info!(solve_duration_us = elapsed_us, status = "ok", "solve_mip completed");
         Ok(Response::new(mip_resp_to_proto(plan)))
     }
 }
