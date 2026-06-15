@@ -66,6 +66,10 @@ impl TenantRegistry {
     /// - Unknown slug → `PERMISSION_DENIED`
     /// - In-flight cap reached → `RESOURCE_EXHAUSTED`
     /// - Semaphore closed (process shutdown) → `UNAVAILABLE`
+    // Kept `async fn` to preserve the API shape if we later switch to
+    // `acquire_owned().await` (blocking) — callers shouldn't have to flip
+    // between `.await` and no-await.
+    #[allow(clippy::unused_async)]
     pub async fn acquire(&self, slug: &str) -> Result<OwnedSemaphorePermit, Status> {
         let sem = self
             .permits
