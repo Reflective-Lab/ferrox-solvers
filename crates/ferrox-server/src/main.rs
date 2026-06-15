@@ -26,6 +26,9 @@ use service::FerroxSolverService;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .json()
+        .with_current_span(true)
+        .with_span_list(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "ferrox_server=info".parse().unwrap()),
