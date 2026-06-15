@@ -36,7 +36,7 @@ spec:
       # Cloud Run hard ceiling for unary HTTP/2 — clamp our timeout below.
       timeoutSeconds: 300
       containers:
-        - image: europe-west1-docker.pkg.dev/reflective-labs/converge/ferrox-server:v0.7.2-d5c2af7
+        - image: europe-west1-docker.pkg.dev/reflective-labs/converge/ferrox-server:v0.7.2-312605d
           ports:
             # name: h2c — tells Cloud Run to use HTTP/2 cleartext to the
             # container. Cloud Run still terminates client-facing TLS.
