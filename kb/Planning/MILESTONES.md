@@ -29,6 +29,7 @@ source: mixed
 - [x] Tag v0.5.1
 
 ## Next: Native Solver Assurance Hardening
+**Epic:** E9
 
 **Target:** 2026-05/06 | **Tracks:** OR-Tools + HiGHS reproducibility
 
