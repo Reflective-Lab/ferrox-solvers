@@ -8,6 +8,10 @@ repository.workspace = true
 publish       = false
 description   = "gRPC server exposing ferrox solvers (CP-SAT, GLOP, HiGHS)"
 
+[lib]
+name = "converge_ferrox_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ferrox-server"
 path = "src/main.rs"
@@ -24,14 +28,21 @@ ferrox-highs-sys     = { workspace = true, optional = true }
 
 tonic                = { version = "0.14", features = ["tls-ring"] }
 tonic-prost          = "0.14"
+tonic-health         = "0.14"
+tonic-reflection     = "0.14"
 prost                = "0.14"
 tokio                = { workspace = true }
 tracing              = { workspace = true }
-tracing-subscriber   = { version = "0.3.23", features = ["env-filter"] }
+tracing-subscriber   = { version = "0.3.23", features = ["env-filter", "json"] }
 anyhow               = "1"
+uuid                 = { version = "1", features = ["v4"] }
 
 [build-dependencies]
 tonic-prost-build = "0.14"
+
+[dev-dependencies]
+serial_test = "3"
+temp-env    = "0.3"
 
 [lints]
 workspace = true

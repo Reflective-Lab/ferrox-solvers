@@ -36,7 +36,7 @@ RUN git clone --depth 1 --branch ${HIGHS_TAG} \
 FROM rust:1.94-trixie AS rust-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake clang libclang-dev protobuf-compiler \
+    build-essential cmake clang libclang-dev protobuf-compiler git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Bring full source + build trees so the sys crates' build.rs finds headers
@@ -49,9 +49,24 @@ WORKDIR /workspace
 # Build context is the ferrox repo root.
 COPY . /workspace/
 
-# Docker builds only receive the ferrox repo as context, so local Reflective
-# path patches cannot resolve. Use the published workspace dependency versions.
-RUN sed -i '/^\[patch\.crates-io\]/,$d' /workspace/Cargo.toml && \
+# [patch.crates-io] in Cargo.toml references sibling repos via the
+# developer-monorepo layout (`../../bedrock-platform/converge/...`,
+# `../../bedrock-platform/organism/...`). The Docker build context only
+# includes ferrox-solvers, so those paths don't resolve.
+#
+# Approach (mirrors marquee-apps/quorum-sense/deploy/backend/Dockerfile.cloudrun):
+# clone the sibling repos to /bedrock-platform/<name> and sed-rewrite the
+# patch paths to point at the clones. This keeps ferrox's source on the
+# same converge-pack/organism API surface it was authored against —
+# crucial when ferrox uses APIs not yet published to crates.io
+# (e.g., ProvenanceSource::proposed_fact_for added post-3.9.2).
+RUN mkdir -p /bedrock-platform && \
+    git clone --depth=1 --quiet https://github.com/Reflective-Lab/converge.git /bedrock-platform/converge && \
+    git clone --depth=1 --quiet https://github.com/Reflective-Lab/organism.git /bedrock-platform/organism
+
+RUN sed -i \
+      -e 's|path = "../../bedrock-platform/|path = "/bedrock-platform/|g' \
+      /workspace/Cargo.toml && \
     rm -f /workspace/Cargo.lock
 
 ENV FERROX_ORTOOLS_ROOT=/opt/ortools/build

@@ -1,0 +1,36 @@
+# Cloud Build — ferrox-server image for Cloud Run (reflective-labs/prod).
+#
+# Usage:
+#   gcloud builds submit . \
+#       --project=reflective-labs \
+#       --config=ops/cloudbuild.prod.yaml \
+#       --substitutions=_TAG=v0.7.2-$(git rev-parse --short HEAD)
+#
+# The Dockerfile at repo root builds OR-Tools + HiGHS in Stage 1 and
+# compiles the Rust server in Stage 2 — self-contained, no math-base.
+
+substitutions:
+  _TAG: "latest"
+  _REPO: "europe-west1-docker.pkg.dev/reflective-labs/converge"
+
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    env:
+      - "DOCKER_BUILDKIT=1"
+    args:
+      - "build"
+      - "-t"
+      - "${_REPO}/ferrox-server:${_TAG}"
+      - "-f"
+      - "Dockerfile"
+      - "."
+
+images:
+  - "${_REPO}/ferrox-server:${_TAG}"
+
+options:
+  machineType: "E2_HIGHCPU_8"
+  logging: CLOUD_LOGGING_ONLY
+  diskSizeGb: 100  # OR-Tools + HiGHS build artifacts are big
+
+timeout: "3600s"  # OR-Tools + HiGHS cold build can take ~30 min on E2_HIGHCPU_8
